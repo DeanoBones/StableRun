@@ -1,6 +1,10 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>StableRun</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Hanken+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: one racecard column. The loud moments are the hero banner and the race stage; every other panel stays quiet and print-like. */
@@ -215,73 +219,83 @@ pre.share{margin:0 0 12px;padding:14px;background:var(--bg);border:1px solid var
 #toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:4px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:20;max-width:calc(100% - 32px)}
 #toast.show{opacity:1;transform:translate(-50%,0)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
-</style>
 
+/* ---- additions for the live app ---- */
+[hidden]{display:none!important}
+:root{color-scheme:light}
+select{width:100%;min-width:0;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:12px 14px;font:500 16px var(--f-body);min-height:46px}
+.top-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#claimChip{background:var(--accent);color:var(--accent-ink);border:1px solid var(--accent);border-radius:4px;padding:8px 12px;font:700 13px var(--f-body);cursor:pointer;min-height:36px}
+#claimChip[disabled]{opacity:.5;cursor:not-allowed}
+.warn{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--surface);border:1px solid var(--gold);border-radius:6px;padding:12px 14px;margin-bottom:18px}
+.warn.bad{border-color:var(--accent)}
+.warn span{min-width:0;flex:1 1 260px}
+a.btn{text-decoration:none}
+.check{display:flex;gap:10px;align-items:flex-start;margin-top:16px;font-size:13.5px;color:var(--muted);cursor:pointer}
+.check input{margin-top:3px;flex:none}
+.forfs{margin-top:14px;border-top:1px dashed var(--line);padding-top:6px}
+.forf{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0;color:var(--muted)}
+.forf .nm{display:grid;overflow-wrap:anywhere}
+.forf small{font-size:12.5px}
+.foot a{color:var(--ink)}
+</style>
+</head>
+<body>
 <div class="app">
   <header class="top">
     <div class="brand">
       <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 27V14a9 9 0 0 1 18 0v13h-5.5V14a3.5 3.5 0 0 0-7 0v13z" fill="currentColor"/><circle cx="9.7" cy="21" r="1.1" fill="var(--bg)"/><circle cx="9.7" cy="16.5" r="1.1" fill="var(--bg)"/><circle cx="22.3" cy="21" r="1.1" fill="var(--bg)"/><circle cx="22.3" cy="16.5" r="1.1" fill="var(--bg)"/></svg>
-      <span>StableRun</span><span class="net">Base Sepolia · prototype</span>
+      <span>StableRun</span><span class="net" id="netLabel"></span>
     </div>
-    <button class="wallet" id="wallet" data-act="switch" type="button" title="Switch to a different demo wallet"></button>
+    <div class="top-right"><button type="button" id="claimChip" hidden></button><button class="wallet" id="wallet" type="button" hidden></button></div>
   </header>
-  <ol class="rail" id="rail" aria-label="Race progress"></ol>
-  <main id="main"></main>
-  <footer class="foot">Prototype with mock USDC and simulated friends. Nothing here touches a chain. The name boost uses a simple browser hash for now; the contract will derive it from the wallet address and horse name, and take the secrets for the race roll.</footer>
+  <div id="notice"></div>
+  <ol class="rail" id="rail" aria-label="Race progress" hidden></ol>
+  <main id="main"><p class="sub">Loading…</p></main>
+  <footer class="foot" id="foot"></footer>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
-
 <script>
 (function(){
 'use strict';
+/* After deploying, paste your contract address between the quotes and set the network.
+   Or leave it blank and enter both on the Settings screen of the page. */
+var DEFAULT_CONTRACT='';
+/* ====== StableRun app: no external libraries. Talks to the wallet with plain JSON-RPC. ====== */
+var SEL={createAndJoin:'0xf3434fac',join:'0x45d8d1f9',reveal:'0x4036778f',startRace:'0x24d822bf',cancel:'0x40e58ee5',claim:'0x4e71d92d',
+  nextGameId:'0xb135bbb0',getGame:'0xa2f77bcc',getPlayers:'0x460e2049',commitHash:'0xaea89e23',claimable:'0x402914f5',usdc:'0x3e413bee',
+  seatOf:'0x2b3dac4c',approve:'0x095ea7b3',allowance:'0xdd62ed3e',balanceOf:'0x70a08231'};
+var NETS={
+  8453:{name:'Base',hex:'0x2105',rpc:'https://mainnet.base.org',explorer:'https://basescan.org'},
+  84532:{name:'Base Sepolia',hex:'0x14a34',rpc:'https://sepolia.base.org',explorer:'https://sepolia.basescan.org'},
+  31337:{name:'Local test chain',hex:'0x7a69',rpc:'http://127.0.0.1:8545',explorer:''}
+};
+var CIRCLE_BASE_USDC='0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+var MAXU=(1n<<256n)-1n;
+var ST={NONE:0,OPEN:1,REVEALING:2,FINAL:3,CANCELLED:4};
+var SEED_LIFETIME=250;
 
-// <pure>
+/* ---------- tiny helpers ---------- */
+var $=function(s,r){return (r||document).querySelector(s);};
+var esc=function(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});};
+var short=function(a){return a.slice(0,6)+'…'+a.slice(-4);};
+var rnd=function(a,b){return a+Math.random()*(b-a);};
+var pick=function(arr){return arr[Math.floor(Math.random()*arr.length)];};
+var RM=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+var HORSES=['Gas Fee','Midnight Invoice','Hot Take','Pennywise','Lunchbreak','Cold Brew','Sir Reginald','Dead Cat','Moon Landing','Burnt Toast','Salt Flats','Tuesday','Gravel Rash','Soft Launch','Fiscal Cliff','Last Orders','Sunday Roast','Tin Whistle'];
 function h32(str, seed){
   var h=(2166136261 ^ seed)>>>0;
   for(var i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619)>>>0; }
   h^=h>>>15; h=Math.imul(h,2246822507)>>>0; h^=h>>>13; h=Math.imul(h,3266489909)>>>0; h^=h>>>16;
   return h>>>0;
 }
-function hex64(str){ var s=''; for(var i=0;i<8;i++){ s+=h32(str,1000+i*7919).toString(16).padStart(8,'0'); } return '0x'+s; }
-function norm(name){ return String(name).trim().replace(/\s+/g,' '); }
-function nameBoost(addr,name){
-  // average of three independent draws, so mid-range boosts are common and high ones are rare
-  var k=addr.toLowerCase()+'|'+norm(name).toLowerCase(), t=0;
-  for(var i=0;i<3;i++) t+=h32(k,77+i*131)%1201;
-  return Math.round(t/3)/100;
-}
 var COATS=['#6a3d20','#8b5a2b','#2a211d','#a8743d','#7b7b7b','#c9b58c','#4a2e1c','#8d6b4f'];
 function silksFor(addr,name){
-  var h=h32(addr.toLowerCase()+'|'+norm(name).toLowerCase(),5);
+  var h=h32(addr.toLowerCase()+'|'+String(name).trim().toLowerCase(),5);
   var hue=h%360, hue2=(hue+140+((h>>>9)%80))%360;
   return {c1:'hsl('+hue+' 72% 44%)', c2:'hsl('+hue2+' 85% 78%)', pattern:(h>>>16)%3, coat:COATS[(h>>>20)%COATS.length]};
 }
-function computeRace(entries){
-  var seed=hex64(entries.map(function(e){return e.secret;}).join('|'));
-  var rows=entries.map(function(e,i){
-    var roll=(h32(seed+'|'+e.addr.toLowerCase(),11)%10000)/100;
-    return {idx:i, roll:roll, boost:e.boost, score:Math.round((roll+e.boost)*100)/100};
-  });
-  var maxScore=Math.max.apply(null,rows.map(function(r){return r.score;}));
-  rows.forEach(function(r){
-    r.T=16+(maxScore-r.score)*0.06;
-    var h=h32(seed+'|'+entries[r.idx].addr.toLowerCase(),21);
-    r.k1=1+(h%4); r.k2=1+((h>>>3)%5); if(r.k2===r.k1) r.k2=(r.k2%5)+1;
-    r.A1=((h>>>6)%111)/100-0.55;
-    r.A2=((h>>>13)%71)/100-0.35;
-  });
-  var order=rows.slice().sort(function(a,b){return b.score-a.score||a.idx-b.idx;});
-  order.forEach(function(r,i){r.rank=i+1;});
-  return {seed:seed, rows:rows, order:order};
-}
-function progress(r,tau){
-  var u=Math.min(1,Math.max(0,tau/r.T));
-  return u+r.A1/(r.k1*Math.PI)*Math.sin(r.k1*Math.PI*u)+r.A2/(r.k2*Math.PI)*Math.sin(r.k2*Math.PI*u);
-}
-function speedAt(r,tau){
-  var u=Math.min(1,Math.max(0,tau/r.T));
-  return (1+r.A1*Math.cos(r.k1*Math.PI*u)+r.A2*Math.cos(r.k2*Math.PI*u))/r.T;
-}
+function ord(n){ var s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
 function marginText(w,l){
   var len=(l.T-w.T)/l.T*12.86;
   if(len<0.1) return 'a nose';
@@ -293,34 +307,105 @@ function marginText(w,l){
   var f=fr===0.25?'¼':fr===0.5?'½':fr===0.75?'¾':'';
   return whole+f+' lengths';
 }
-function ord(n){ var s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
-function boostWord(b){ return b<3.5?'Plodder':b<5.2?'Steady':b<6.8?'Handy':b<8.5?'Quick':b<10?'Flyer':'Once in a generation'; }
-// </pure>
-
-/* ---------- helpers ---------- */
-var $=function(s,r){return (r||document).querySelector(s);};
-var esc=function(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});};
-var short=function(a){return a.slice(0,6)+'…'+a.slice(-4);};
-var rnd=function(a,b){return a+Math.random()*(b-a);};
-var fmt=function(n){return String(Math.round(n*100)/100);};
-var pick=function(arr){return arr[Math.floor(Math.random()*arr.length)];};
-function randHex(n){
-  var b=new Uint8Array(n);
-  if(window.crypto&&crypto.getRandomValues) crypto.getRandomValues(b); else for(var i=0;i<n;i++) b[i]=Math.random()*256|0;
-  return Array.prototype.map.call(b,function(x){return x.toString(16).padStart(2,'0');}).join('');
+function usd(u){ var s=(Number(u)/1e6).toFixed(6).replace(/0+$/,'').replace(/\.$/,''); return s===''?'0':s; }
+function parseUsd(str){
+  str=String(str).trim();
+  if(!/^\d{1,9}(\.\d{1,6})?$/.test(str)) return null;
+  var p=str.split('.'), whole=BigInt(p[0]), frac=BigInt(((p[1]||'')+'000000').slice(0,6));
+  var v=whole*1000000n+frac;
+  return v>=10000n?v:null;
 }
-var newAddr=function(){return '0x'+randHex(20);};
-var RM=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+function mmss(sec){ sec=Math.max(0,Math.floor(sec)); var m=Math.floor(sec/60), s=sec%60; return m+':'+String(s).padStart(2,'0'); }
+function hms(sec){ sec=Math.max(0,Math.floor(sec)); var h=Math.floor(sec/3600), m=Math.floor(sec%3600/60); return h+'h '+String(m).padStart(2,'0')+'m'; }
 
-var FRIENDS=['mia.base.eth','kofi.base.eth','priya.base.eth','dan.base.eth','sol.base.eth','june.base.eth','tariq.base.eth','lena.base.eth','omar.base.eth'];
-var HORSES=['Gas Fee','Midnight Invoice','Hot Take','Pennywise','Lunchbreak','Cold Brew','Sir Reginald','Dead Cat','Moon Landing','Burnt Toast','Salt Flats','Tuesday','Gravel Rash','Soft Launch','Fiscal Cliff','Last Orders','Sunday Roast','Tin Whistle'];
-var OPEN=[
-  {code:'RUN-4F7K',host:'mia.base.eth',n:4,stake:5,taken:2},
-  {code:'RUN-90QD',host:'kofi.base.eth',n:6,stake:10,taken:4},
-  {code:'RUN-K2M8',host:'priya.base.eth',n:3,stake:1,taken:1}
-];
 
-var S={view:'lobby',wallet:{addr:'0x7a3f19c2d5b84e60a1f7c3d9e25b6048a91c4d7e',bal:250},draft:{n:4,stake:5},game:null,race:null,tried:[],timers:[],preview:null,settled:false};
+/* ---------- race motion (same maths as the prototype) ---------- */
+function progress(r,tau){
+  var u=Math.min(1,Math.max(0,tau/r.T));
+  return u+r.A1/(r.k1*Math.PI)*Math.sin(r.k1*Math.PI*u)+r.A2/(r.k2*Math.PI)*Math.sin(r.k2*Math.PI*u);
+}
+function speedAt(r,tau){
+  var u=Math.min(1,Math.max(0,tau/r.T));
+  return (1+r.A1*Math.cos(r.k1*Math.PI*u)+r.A2*Math.cos(r.k2*Math.PI*u))/r.T;
+}
+
+/* ---------- ABI by hand (only what this app needs) ---------- */
+var W=function(v){return BigInt(v).toString(16).padStart(64,'0');};
+var addrW=function(a){return a.toLowerCase().replace(/^0x/,'').padStart(64,'0');};
+function encStr(s){
+  var b=new TextEncoder().encode(s), hex='';
+  for(var i=0;i<b.length;i++) hex+=b[i].toString(16).padStart(2,'0');
+  return W(b.length)+hex.padEnd(Math.max(64,Math.ceil(hex.length/64)*64),'0');
+}
+function words(hex){ var d=hex.replace(/^0x/,''), out=[]; for(var i=0;i+64<=d.length;i+=64) out.push(d.slice(i,i+64)); return out; }
+function wAddr(w){ return '0x'+w.slice(24); }
+function wNum(w){ return BigInt('0x'+w); }
+function decodeGame(hex){
+  var w=words(hex); if(w.length<11) return null;
+  return {host:wAddr(w[0]),stake:wNum(w[1]),maxPlayers:Number(wNum(w[2])),status:Number(wNum(w[3])),joinDeadline:Number(wNum(w[4])),
+    revealDeadline:Number(wNum(w[5])),playerCount:Number(wNum(w[6])),revealedCount:Number(wNum(w[7])),winner:wAddr(w[8]),seed:'0x'+w[9],seedBlock:Number(wNum(w[10]))};
+}
+function decodeStr(d,wordIdx){
+  var len=Number(wNum(d.slice(wordIdx*64,wordIdx*64+64))), hex=d.slice(wordIdx*64+64,wordIdx*64+64+len*2), b=new Uint8Array(len);
+  for(var i=0;i<len;i++) b[i]=parseInt(hex.substr(i*2,2),16);
+  return new TextDecoder().decode(b);
+}
+function decodePlayers(hex){
+  var d=hex.replace(/^0x/,''), W_=function(i){return d.slice(i*64,i*64+64);};
+  var arr=Number(wNum(W_(0)))/32, n=Number(wNum(W_(arr))), out=[];
+  for(var i=0;i<n;i++){
+    var start=arr+1+Number(wNum(W_(arr+1+i)))/32;
+    out.push({wallet:wAddr(W_(start)).toLowerCase(),revealed:wNum(W_(start+1))===1n,boost:Number(wNum(W_(start+2))),roll:Number(wNum(W_(start+3))),
+      score:Number(wNum(W_(start+4))),commit:'0x'+W_(start+5),name:decodeStr(d,start+Number(wNum(W_(start+7)))/32)});
+  }
+  return out;
+}
+function revertReason(err){
+  var data=(err&&(err.data&&(err.data.data||err.data)))||(err&&err.error&&err.error.data)||(err&&err.info&&err.info.error&&err.info.error.data);
+  if(typeof data==='object'&&data&&data.data) data=data.data;
+  if(typeof data==='string'&&data.indexOf('0x08c379a0')===0){
+    try{ return decodeStr(data.slice(10),1); }catch(e){}
+  }
+  var m=String((err&&err.message)||'').match(/execution reverted:?\s*([^"\n]*)/i);
+  return m&&m[1]?m[1].trim():'';
+}
+function friendly(err){
+  if(err&&(err.code===4001||err.code==='ACTION_REJECTED')) return 'You cancelled the request in your wallet.';
+  var r=revertReason(err);
+  var map={
+    'USDC transferFrom failed (approve first?)':'USDC approval is missing, or your USDC balance is too low.',
+    'game id changed, try again':'Someone else created a race at the same moment. Try again.',
+    'USDC not found on this network':'This contract cannot find USDC on this network. Check the network and the contract address.',
+    'reveal window still open':'Not yet. Everyone still has time to reveal.',
+    'wait for the next block':'Wait a couple of seconds for the next block, then press again.',
+    'name already taken in this race':'Another horse in this race already has that name.',
+    'name has an invalid character':'Letters, numbers, spaces, apostrophes and hyphens only.',
+    'join window closed':'This race is no longer open to new players.',
+    'game is not open':'This race is no longer open to new players.'
+  };
+  if(r) return map[r]||r;
+  return (err&&err.message)?String(err.message).slice(0,200):'Something went wrong.';
+}
+
+/* ---------- state ---------- */
+var S={cfg:null,provider:null,providerName:'',account:null,chainId:null,usdc:null,clock:{block:0,ts:0,at:0},route:{name:'lobby'},game:null,
+  raceSeats:[],race:null,watching:false,lastStatus:null,busy:'',recent:null,claimable:0n,balance:0n,timers:[],draft:{n:4,stake:'5',name:''},
+  nameDraft:'',providers:[],ready:false,notice:null,sig:'',approveExact:false,polling:false,preview:null};
+var VIEWFN={}, INIT={};
+
+function loadCfg(){
+  var c={contract:'',chainId:8453};
+  try{ var raw=JSON.parse(localStorage.getItem('stablerun:cfg')||'null'); if(raw&&typeof raw==='object'){ c.contract=raw.contract||''; c.chainId=raw.chainId||8453; } }catch(e){}
+  if(!c.contract&&typeof DEFAULT_CONTRACT==='string') c.contract=DEFAULT_CONTRACT;
+  return c;
+}
+function saveCfg(){ try{ localStorage.setItem('stablerun:cfg',JSON.stringify(S.cfg)); }catch(e){} }
+function C(){ return S.cfg.contract.toLowerCase(); }
+function net(){ return NETS[S.cfg.chainId]||{name:'chain '+S.cfg.chainId,hex:'0x'+Number(S.cfg.chainId).toString(16),rpc:'',explorer:''}; }
+function secretKey(id){ return 'stablerun:secret:'+S.cfg.chainId+':'+C()+':'+id+':'+S.account; }
+function saveSecret(id,s){ try{ localStorage.setItem(secretKey(id),s); }catch(e){} }
+function loadSecret(id){ try{ return localStorage.getItem(secretKey(id)); }catch(e){ return null; } }
+function randomSecret(){ var b=new Uint8Array(32); crypto.getRandomValues(b); return '0x'+Array.prototype.map.call(b,function(x){return x.toString(16).padStart(2,'0');}).join(''); }
 
 /* ---------- timers and loops ---------- */
 function later(fn,ms){ var id=setTimeout(fn,ms); S.timers.push(id); return id; }
@@ -334,56 +419,157 @@ function startLoop(fn){
   rafId=requestAnimationFrame(f);
 }
 var toastT=0;
-function toast(msg){ var t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(function(){t.classList.remove('show');},2800); }
+function toast(msg){ var t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(function(){t.classList.remove('show');},3600); }
 function copyText(t,ok){
   var fail=function(){toast('Copy was blocked here. Select the text and copy it.');};
   if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(t).then(function(){toast(ok||'Copied');},fail); } else fail();
 }
-function fakeTx(btn,labels,done){
-  btn.disabled=true; var orig=btn.textContent; btn.textContent=labels[0];
-  later(function(){ btn.textContent=labels[1]; later(function(){ btn.textContent=orig; done(); },1000); },900);
+
+/* ---------- JSON-RPC through the wallet ---------- */
+function rpc(method,params){ return S.provider.request({method:method,params:params||[]}); }
+function ethCall(to,data,from){ var p={to:to,data:data}; if(from) p.from=from; return rpc('eth_call',[p,'latest']); }
+function chainNow(){ return S.clock.ts+(Date.now()-S.clock.at)/1000; }
+async function refreshClock(){
+  var b=await rpc('eth_getBlockByNumber',['latest',false]);
+  S.clock={block:parseInt(b.number,16),ts:parseInt(b.timestamp,16),at:Date.now()};
+}
+async function waitReceipt(hash){
+  for(var i=0;i<160;i++){
+    var rc=await rpc('eth_getTransactionReceipt',[hash]);
+    if(rc) return rc;
+    await new Promise(function(r){setTimeout(r,1500);});
+  }
+  throw new Error('Still waiting for the network. Check your wallet for the transaction status.');
+}
+async function send(to,data,label){
+  setBusy(label+': check your wallet…');
+  try{ await ethCall(to,data,S.account); }catch(e){ setBusy(''); throw new Error(friendly(e)); }
+  var hash;
+  try{ hash=await rpc('eth_sendTransaction',[{from:S.account,to:to,data:data}]); }catch(e){ setBusy(''); throw new Error(friendly(e)); }
+  setBusy(label+': waiting for the network…');
+  try{
+    var rc=await waitReceipt(hash);
+    if(rc.status!=='0x1') throw new Error('The transaction failed on chain.');
+    return rc;
+  } finally { setBusy(''); }
+}
+function setBusy(t){ S.busy=t; render(); }
+
+/* ---------- wallet connection ---------- */
+function discoverProviders(){
+  return new Promise(function(res){
+    var found=[];
+    function onAnn(e){ if(e&&e.detail&&e.detail.provider) found.push(e.detail); }
+    window.addEventListener('eip6963:announceProvider',onAnn);
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+    setTimeout(function(){
+      window.removeEventListener('eip6963:announceProvider',onAnn);
+      if(!found.length&&window.ethereum) found.push({info:{name:'Browser wallet',uuid:'window.ethereum'},provider:window.ethereum});
+      res(found);
+    },250);
+  });
+}
+async function useProvider(detail,prompt){
+  S.provider=detail.provider; S.providerName=detail.info.name;
+  var accts=await rpc(prompt?'eth_requestAccounts':'eth_accounts',[]);
+  if(!accts||!accts.length){ S.provider=null; return false; }
+  S.account=String(accts[0]).toLowerCase();
+  try{ localStorage.setItem('stablerun:wallet',detail.info.uuid); }catch(e){}
+  if(S.provider.on){
+    S.provider.on('accountsChanged',function(){ location.reload(); });
+    S.provider.on('chainChanged',function(){ location.reload(); });
+  }
+  return true;
+}
+async function afterConnect(){
+  S.chainId=parseInt(await rpc('eth_chainId',[]),16);
+  if(S.chainId!==Number(S.cfg.chainId)){ S.ready=false; S.notice={kind:'switch'}; render(); return; }
+  var code=await rpc('eth_getCode',[S.cfg.contract,'latest']);
+  if(!code||code==='0x'){ S.ready=false; S.notice={kind:'nocontract'}; render(); return; }
+  try{ S.usdc=wAddr(words(await ethCall(S.cfg.contract,SEL.usdc))[0]).toLowerCase(); }catch(e){ S.ready=false; S.notice={kind:'nocontract'}; render(); return; }
+  S.notice=null;
+  if(Number(S.cfg.chainId)===8453&&S.usdc!==CIRCLE_BASE_USDC) S.notice={kind:'badtoken'};
+  S.ready=true;
+  await refreshAll();
+  startPolling();
+  render();
+}
+async function switchChain(){
+  var n=net();
+  try{ await rpc('wallet_switchEthereumChain',[{chainId:n.hex}]); }
+  catch(e){
+    if(e&&e.code===4902&&n.rpc){
+      try{ await rpc('wallet_addEthereumChain',[{chainId:n.hex,chainName:n.name,rpcUrls:[n.rpc],nativeCurrency:{name:'Ether',symbol:'ETH',decimals:18},blockExplorerUrls:n.explorer?[n.explorer]:[]}]); }
+      catch(e2){ toast(friendly(e2)); }
+    } else toast(friendly(e));
+  }
 }
 
-/* ---------- game model ---------- */
-function makeSeat(o){
-  var secret=randHex(32);
-  return {addr:o.addr,owner:o.owner,name:norm(o.name),boost:nameBoost(o.addr,o.name),silks:silksFor(o.addr,o.name),secret:secret,commit:hex64('commit|'+secret+'|'+o.addr),revealed:false,you:!!o.you};
+/* ---------- chain reads ---------- */
+async function loadGame(id){
+  var gh=await ethCall(S.cfg.contract,SEL.getGame+W(id));
+  var g=decodeGame(gh);
+  if(!g||g.status===ST.NONE) return null;
+  var players=decodePlayers(await ethCall(S.cfg.contract,SEL.getPlayers+W(id)));
+  g.id=id; g.code='#'+id; g.players=players;
+  g.me=players.findIndex(function(p){return p.wallet===S.account;});
+  g.hasSecret=!!loadSecret(id);
+  return g;
 }
-function addBot(G){
-  var used=G.seats.map(function(s){return s.name.toLowerCase();}), usedO=G.seats.map(function(s){return s.owner;});
-  var name,owner;
-  do{name=pick(HORSES);}while(used.indexOf(name.toLowerCase())>=0);
-  do{owner=pick(FRIENDS);}while(usedO.indexOf(owner)>=0);
-  G.seats.push(makeSeat({addr:newAddr(),owner:owner,name:name}));
+async function refreshBalances(){
+  S.claimable=BigInt(await ethCall(S.cfg.contract,SEL.claimable+addrW(S.account)));
+  S.balance=BigInt(await ethCall(S.usdc,SEL.balanceOf+addrW(S.account)));
 }
-function newGame(o){
-  var G={code:o.code,n:o.n,stake:o.stake,host:o.host,seats:[],you:null};
-  for(var i=0;i<o.taken;i++) addBot(G);
-  if(o.taken>0&&o.host!=='You') G.seats[0].owner=o.host;
-  return G;
+async function loadRecent(){
+  var next=Number(BigInt(await ethCall(S.cfg.contract,SEL.nextGameId)));
+  var ids=[]; for(var i=next-1;i>=1&&ids.length<12;i--) ids.push(i);
+  var list=await Promise.all(ids.map(async function(id){
+    var g=decodeGame(await ethCall(S.cfg.contract,SEL.getGame+W(id)));
+    var seat=Number(BigInt(await ethCall(S.cfg.contract,SEL.seatOf+W(id)+addrW(S.account))));
+    g.id=id; g.seat=seat; return g;
+  }));
+  S.recent=list;
 }
-function genCode(){ var a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',s='RUN-'; for(var i=0;i<4;i++) s+=a[Math.floor(Math.random()*a.length)]; return s; }
-var pool=function(){return Math.round(S.game.stake*S.game.n*100)/100;};
+async function refreshAll(){
+  await refreshClock();
+  await refreshBalances();
+  if(S.route.name==='game'){
+    var prev=S.game&&S.game.id===S.route.id?S.game.status:null;
+    var g=await loadGame(S.route.id);
+    if(g&&prev===ST.REVEALING&&g.status===ST.FINAL&&g.revealedCount>=2) S.watching=true;
+    S.game=g;
+    if(g&&g.status===ST.FINAL&&g.revealedCount>=2) buildRace(g);
+  } else {
+    S.game=null; await loadRecent();
+  }
+}
+function startPolling(){
+  if(S.pollId) return;
+  S.pollId=setInterval(async function(){
+    if(S.polling||!S.ready||document.hidden||S.busy) return;
+    S.polling=true;
+    try{ await refreshAll(); render(); }catch(e){}
+    S.polling=false;
+  },2500);
+  setInterval(tick,1000);
+}
 
-/* ---------- navigation ---------- */
-var VIEWS=['lobby','stable','gate','reveal','race','result'];
-var VLABEL={lobby:'Lobby',stable:'Stable',gate:'Gate',reveal:'Reveal',race:'Race',result:'Result'};
-function renderRail(){
-  var i=VIEWS.indexOf(S.view);
-  $('#rail').innerHTML=VIEWS.map(function(v,k){
-    return '<li class="'+(k<i?'done':k===i?'now':'')+'"'+(k===i?' aria-current="step"':'')+'><span class="n">'+(k+1)+'</span>'+VLABEL[v]+'</li>';
-  }).join('');
+/* ---------- race data from chain results ---------- */
+function buildRace(g){
+  var seats=[], rows=[];
+  g.players.forEach(function(p,i){ if(p.revealed) seats.push({addr:p.wallet,owner:short(p.wallet),name:p.name,boost:p.boost/100,silks:silksFor(p.wallet,p.name),you:p.wallet===S.account,pi:i}); });
+  var maxPts=Math.max.apply(null,seats.map(function(s){return g.players[s.pi].score/100;}));
+  seats.forEach(function(s,i){
+    var p=g.players[s.pi], pts=p.score/100, h=h32(g.seed+'|'+p.wallet,21);
+    var r={idx:i,roll:p.roll/100,boost:p.boost/100,score:pts,T:16+(maxPts-pts)*0.06,k1:1+(h%4),k2:1+((h>>>3)%5),A1:((h>>>6)%111)/100-0.55,A2:((h>>>13)%71)/100-0.35};
+    if(r.k2===r.k1) r.k2=(r.k2%5)+1;
+    rows.push(r);
+  });
+  var order=rows.slice().sort(function(a,b){return b.score-a.score||a.idx-b.idx;});
+  order.forEach(function(r,i){r.rank=i+1;});
+  S.raceSeats=seats; S.race={rows:rows,order:order,seed:g.seed,tx:''};
 }
-function renderWallet(){
-  $('#wallet').innerHTML='<span>'+short(S.wallet.addr)+'</span><span class="bal">'+S.wallet.bal.toFixed(2)+' USDC</span>';
-}
-function go(v){
-  stopLoop(); clearTimers(); S.preview=null;
-  S.view=v; renderRail(); renderWallet();
-  $('#main').innerHTML=VIEWFN[v]();
-  try{ window.scrollTo(0,0); }catch(e){}
-  if(INIT[v]) INIT[v]();
-}
+var pool=function(){ var g=S.game; return usd(g.stake*BigInt(g.playerCount)); };
 
 /* ---------- drawing ---------- */
 function darken(hex,f){ var n=parseInt(hex.slice(1),16); var c=function(v){return Math.round(v*f);}; return 'rgb('+c((n>>16)&255)+','+c((n>>8)&255)+','+c(n&255)+')'; }
@@ -468,219 +654,12 @@ function heroInit(){
   if(!RM) startLoop(draw);
 }
 
-/* ---------- views ---------- */
-var VIEWFN={}, INIT={};
-
-VIEWFN.lobby=function(){
-  var d=S.draft;
-  return '<section class="hero"><h1>Name a horse.<br><em>Win the pool.</em></h1>'+
-    '<p class="lede">Friends enter a race with USDC, each backing a horse they name themselves. Everyone\'s secret feeds the race roll, and your wallet plus the name sets a permanent speed boost. The contract picks the winner and pays out.</p>'+
-    '<div class="banner"><canvas id="heroCv" aria-label="Horses running laps on a turf track"></canvas></div></section>'+
-    '<div class="grid2">'+
-    '<section class="panel"><h2>Start a race</h2><p class="sub">You set the field size and the stake. Everyone pays the same.</p>'+
-      '<span class="lab" id="nLab">Horses in the race</span>'+
-      '<div class="stepper" role="group" aria-labelledby="nLab"><button type="button" data-act="n-dec" aria-label="One fewer horse">−</button><output id="nVal">'+d.n+'</output><button type="button" data-act="n-inc" aria-label="One more horse">+</button></div>'+
-      '<div class="field"><label class="lab" for="stakeIn">Stake per player (USDC)</label><input type="text" id="stakeIn" inputmode="decimal" autocomplete="off" value="'+(d.stake||'')+'" placeholder="Any amount, minimum 0.01"><div class="chips" role="group" aria-label="Quick amounts" style="margin-top:10px">'+
-      [1,5,10,25].map(function(v){return '<button type="button" class="chip" data-act="stake" data-v="'+v+'" aria-pressed="'+(d.stake===v)+'">'+v+'</button>';}).join('')+'</div></div>'+
-      '<p class="sum" id="createSum"></p>'+
-      '<div class="actions"><button type="button" class="btn hot" data-act="create" id="createBtn">Open the stalls</button></div>'+
-    '</section>'+
-    '<section class="panel"><h2>Open races</h2><p class="sub">Join a friend\'s race, or paste a code.</p>'+
-      '<ul class="list">'+OPEN.map(function(o,i){
-        var dots=''; for(var k=0;k<o.n;k++) dots+='<i class="d'+(k<o.taken?' on':'')+'"></i>';
-        return '<li class="open"><div><b class="mono">'+o.code+'</b><small>Hosted by '+o.host+' · '+o.stake+' USDC</small></div><span class="dots" role="img" aria-label="'+o.taken+' of '+o.n+' seats taken">'+dots+'</span><button type="button" class="btn alt sm" data-act="join" data-i="'+i+'">Join</button></li>';
-      }).join('')+'</ul>'+
-      '<div class="codeform"><input type="text" id="codeIn" placeholder="RUN-XXXX" maxlength="8" autocomplete="off" aria-label="Race code"><button type="button" class="btn alt" data-act="joincode">Join</button></div>'+
-    '</section></div>'+
-    '<ol class="how">'+
-      '<li><span class="k">ENTER</span><b>Name your horse</b><span>Pay the stake in USDC. Your wallet and the name fix its boost.</span></li>'+
-      '<li><span class="k">SEAL</span><b>Commit a secret</b><span>Only a hash of your secret goes on chain, so nobody can steer the roll.</span></li>'+
-      '<li><span class="k">REVEAL</span><b>Show your secret</b><span>Once the stalls are full, every player reveals. The contract mixes them.</span></li>'+
-      '<li><span class="k">RACE</span><b>Watch it run</b><span>Roll plus boost makes the score. Highest score wins the pool.</span></li>'+
-    '</ol>';
-};
-function readStake(){ var v=($('#stakeIn').value||'').trim(); S.draft.stake=/^\d{1,6}(\.\d{1,2})?$/.test(v)&&parseFloat(v)>=0.01?parseFloat(v):null; updateCreateSum(); }
-function updateCreateSum(){
-  var d=S.draft, el=$('#createSum'); if(!el) return;
-  el.innerHTML=d.stake?'Pool <b>'+fmt(d.n*d.stake)+' USDC</b> · winner takes all · 6 furlongs':'Enter a stake of at least 0.01 USDC, with up to 2 decimals.'; var cb=$('#createBtn'); if(cb) cb.disabled=!d.stake;
-  $('#nVal').textContent=d.n;
-  document.querySelectorAll('[data-act=stake]').forEach(function(b){b.setAttribute('aria-pressed',String(+b.dataset.v===d.stake));});
-}
-INIT.lobby=function(){ updateCreateSum(); heroInit(); };
-
-/* stable: trial paddock */
-VIEWFN.stable=function(){
-  var G=S.game;
-  return '<div class="grid-main"><section class="panel"><h2>Trial paddock</h2>'+
-    '<p class="sub">Your horse\'s boost is fixed by this wallet and its name, but nobody sees it until the race is over. Pick a name you like, then enter.</p>'+
-    '<label class="lab" for="horseName">Horse name</label>'+
-    '<div class="row"><input type="text" id="horseName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Try a name"><button type="button" class="btn alt" data-act="rand">Random</button></div>'+
-    '<p class="msg" id="nameMsg"></p>'+
-    '<div class="preview"><canvas id="prevCv" aria-label="Preview of your horse in its silks"></canvas>'+
-      '<div class="boostbox"><span class="lab">Name boost</span><div class="big mono" id="boostVal">?</div><div id="boostWord" class="lab" style="margin:4px 0 0">Type a name</div>'+
-      '<p class="note" style="margin:10px 0 0">Sealed until the race ends. Every name is a gamble.</p></div></div>'+
-    ''+
-    '<div class="actions"><button type="button" class="btn hot" data-act="enter" id="enterBtn" disabled>Enter race · '+G.stake+' USDC</button></div>'+
-    '</section>'+
-    '<aside class="panel"><h2>Racecard</h2><dl class="facts" style="margin-top:12px">'+
-      '<dt>Race</dt><dd>'+G.code+'</dd><dt>Distance</dt><dd>6 furlongs</dd><dt>Stake</dt><dd>'+G.stake+' USDC</dd><dt>Pool</dt><dd>'+pool()+' USDC</dd><dt>Host</dt><dd>'+esc(G.host)+'</dd></dl>'+
-      '<ul class="seats" id="seats" style="margin-top:12px">'+seatsHtml('form')+'</ul>'+
-    '</aside></div>';
-};
-INIT.stable=function(){
-  renderTried(); onName();
-  var inp=$('#horseName'); if(inp) inp.focus({preventScroll:true});
-  var cv=$('#prevCv'), dpr=Math.min(2,window.devicePixelRatio||1), W=260, H=130;
-  cv.width=W*dpr; cv.height=H*dpr; cv.style.aspectRatio=W+' / '+H;
-  var ctx=cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
-  var C=themeColors(), ph=0, fr=0;
-  startLoop(function(dt){
-    fr++; if(fr%90===0) C=themeColors();
-    ph+=dt*(RM?0:6);
-    ctx.fillStyle=C.surface; ctx.fillRect(0,0,W,H);
-    paintTurf(ctx,W,14,H-14,C,0); paintRails(ctx,W,14,H-14,C);
-    var sk=S.preview||{c1:'#7a8a80',c2:'#cdd6d0',pattern:0,coat:'#8b5a2b'};
-    drawHorse(ctx,118,112,1.7,ph,RM?0.4:0.7,sk,S.game.seats.length+1);
-  });
-};
-function seatsHtml(mode){
-  var G=S.game, h='';
-  for(var i=0;i<G.n;i++){
-    var s=G.seats[i];
-    if(!s){ h+='<li class="seat empty"><span class="no">'+(i+1)+'</span><div class="who"><b>Stall '+(i+1)+'</b><small>Waiting for a friend</small></div></li>'; continue; }
-    var st='';
-    if(mode==='gate') st='<span class="tag">Sealed</span>';
-    if(mode==='reveal') st=s.revealed?'<span class="tag ok">Revealed</span>':'<span class="tag">Sealed</span>';
-    h+='<li class="seat'+(s.you?' you':'')+'"><span class="no" style="background:'+s.silks.c1+'">'+(i+1)+'</span><div class="who"><b>'+esc(s.name)+'</b><small>'+esc(s.owner)+' · '+short(s.addr)+'</small></div>'+st+'</li>';
-  }
-  return h;
-}
-function validName(v){
-  if(v.length<2) return 'Use at least 2 characters.';
-  if(v.length>18) return 'Keep it to 18 characters.';
-  if(!/^[A-Za-z0-9 '\-]+$/.test(v)) return 'Letters, numbers, spaces, apostrophes and hyphens only.';
-  if(S.game.seats.some(function(s){return s.name.toLowerCase()===v.toLowerCase();})) return 'Another horse in this race already has that name.';
-  return '';
-}
-function onName(){
-  var inp=$('#horseName'); if(!inp) return;
-  var v=norm(inp.value), msg=$('#nameMsg'), enter=$('#enterBtn');
-  var err=v?validName(v):'', ok=v&&!err;
-  var poor=S.wallet.bal<S.game.stake;
-  if(!v){ S.preview=null; $('#boostWord').textContent='Type a name'; msg.textContent=''; msg.className='msg'; }
-  else if(err){ S.preview=null; $('#boostWord').textContent='Not valid yet'; msg.textContent=err; msg.className='msg bad'; }
-  else {
-    S.preview=silksFor(S.wallet.addr,v);
-    $('#boostWord').textContent='Boost hidden';
-    msg.textContent=poor?'This wallet has less than '+S.game.stake+' USDC.':'Looks good. You will not see its boost until the race ends.'; msg.className='msg'+(poor?' bad':'');
-  }
-  enter.disabled=!ok||poor;
-}
-function renderTried(){
-  var box=$('#triedBox'); if(!box) return;
-  var list=S.tried.filter(function(t){return t.addr===S.wallet.addr;});
-  if(!list.length){ box.innerHTML='<span class="lab">Noted names</span><small>Names you note show up here with their boost, so you can compare.</small>'; return; }
-  var best=Math.max.apply(null,list.map(function(t){return t.boost;}));
-  box.innerHTML='<span class="lab">Noted names</span><div class="chips">'+list.map(function(t){
-    return '<button type="button" class="tchip'+(t.boost===best?' best':'')+'" data-act="tried" data-name="'+esc(t.name)+'">'+esc(t.name)+' <span class="mono">+'+t.boost.toFixed(2)+'</span></button>';
-  }).join('')+'</div>';
-}
-function noteName(){
-  var v=norm($('#horseName').value); if(!v||validName(v)) return;
-  if(!S.tried.some(function(t){return t.addr===S.wallet.addr&&t.name.toLowerCase()===v.toLowerCase();})) S.tried.push({addr:S.wallet.addr,name:v,boost:nameBoost(S.wallet.addr,v)});
-  renderTried();
-}
-function enterRace(){
-  var G=S.game, v=norm($('#horseName').value);
-  if(validName(v)||S.wallet.bal<G.stake) return;
-  fakeTx($('#enterBtn'),['Confirm in your wallet…','Entering on Base…'],function(){
-    S.wallet.bal=Math.round((S.wallet.bal-G.stake)*100)/100;
-    var seat=makeSeat({addr:S.wallet.addr,owner:'You',name:v,you:true});
-    G.seats.push(seat); G.you=seat;
-    go('gate'); scheduleBots();
-  });
-}
-
-/* gate: waiting room */
-VIEWFN.gate=function(){
-  var G=S.game;
-  return '<div class="grid-main"><section class="panel"><h2>The stalls</h2><p class="sub" id="gateSub"></p><ul class="seats" id="seats">'+seatsHtml('gate')+'</ul></section>'+
-    '<aside class="panel"><h2>Invite friends</h2>'+
-    '<div class="codebox"><b>'+G.code+'</b><button type="button" class="btn alt sm" data-act="copycode">Copy</button></div>'+
-    '<dl class="facts"><dt>Pool</dt><dd id="poolVal"></dd><dt>Stake</dt><dd>'+G.stake+' USDC</dd><dt>Field</dt><dd>'+G.n+' horses</dd><dt>Distance</dt><dd>6 furlongs</dd></dl>'+
-    '<p class="note">Your secret is sealed and kept in this tab. Stay on the page until the reveal.</p>'+
-    '<div class="proto"><small>Prototype</small><div class="actions" style="margin-top:8px"><button type="button" class="btn alt sm" data-act="fill">Fill the stalls now</button></div></div>'+
-    '</aside></div>';
-};
-function refreshGate(){
-  var G=S.game, el=$('#seats'); if(!el) return;
-  el.innerHTML=seatsHtml('gate');
-  var left=G.n-G.seats.length;
-  $('#gateSub').textContent=left>0?G.seats.length+' of '+G.n+' horses in. The race starts when the last stall fills.':'All '+G.n+' stalls are full. Heading to the reveal.';
-  $('#poolVal').textContent=fmt(G.seats.length*G.stake)+' of '+pool()+' USDC';
-}
-INIT.gate=function(){ refreshGate(); };
-function scheduleBots(){
-  var G=S.game, need=G.n-G.seats.length;
-  if(need<=0){ later(toReveal,1200); return; }
-  for(var i=0;i<need;i++){
-    later(function(){
-      addBot(G); refreshGate();
-      if(G.seats.length>=G.n) later(toReveal,1500);
-    },1500+i*1700+rnd(0,700));
-  }
-}
-function fillNow(){
-  var G=S.game; clearTimers();
-  while(G.seats.length<G.n) addBot(G);
-  refreshGate(); later(toReveal,900);
-}
-function toReveal(){ go('reveal'); scheduleReveals(); }
-
-/* reveal */
-VIEWFN.reveal=function(){
-  var G=S.game;
-  return '<div class="grid-main"><section class="panel"><h2>Reveal</h2><p class="sub">Each player shows the secret they sealed. The contract mixes them into the race roll, so no single player controls it. You have 15 minutes once the stalls are full. Anyone who misses it forfeits their stake to the players who did reveal.</p><ul class="seats" id="seats">'+seatsHtml('reveal')+'</ul></section>'+
-    '<aside class="panel"><h2>Your secret</h2><div id="revealPanel"></div>'+
-    '<div class="proto"><small>Prototype</small><div class="actions" style="margin-top:8px"><button type="button" class="btn alt sm" data-act="skip">Skip to the result</button></div></div></aside></div>';
-};
-function revealPanel(){
-  var G=S.game, you=G.you, left=G.seats.filter(function(s){return !s.revealed;}).length;
-  if(!you.revealed) return '<p class="sub" style="margin-top:8px">Only the hash '+'<span class="hash">'+short(you.commit)+'</span> is on chain right now. Reveal to prove you chose it.</p><div class="bigact"><button type="button" class="btn hot" data-act="reveal" id="revealBtn">Reveal my secret</button></div>';
-  if(left>0) return '<p class="sub" style="margin-top:8px">Your secret is in. Waiting for '+left+' more '+(left===1?'player':'players')+'.</p><p class="hash">Secret '+short('0x'+you.secret)+'</p>';
-  return '<p class="sub" style="margin-top:8px">Everyone has revealed. Anyone can press Start race. The result comes from all the secrets plus the hash of a block mined after the last reveal, so nobody could know it when they revealed.</p>'+
-    '<p class="hash">Seed '+S.race.seed.slice(0,18)+'…<br>Tx '+S.race.tx.slice(0,18)+'…</p><div class="bigact" style="margin-top:14px"><button type="button" class="btn hot" data-act="watch">Start race</button></div>';
-}
-function refreshReveal(){
-  var a=$('#seats'), b=$('#revealPanel'); if(!a||!b) return;
-  a.innerHTML=seatsHtml('reveal'); b.innerHTML=revealPanel();
-}
-INIT.reveal=function(){ refreshReveal(); };
-function checkAllRevealed(){
-  var G=S.game;
-  if(G.seats.every(function(s){return s.revealed;})&&!S.race){
-    S.race=computeRace(G.seats.map(function(s){return {addr:s.addr,secret:s.secret,boost:s.boost};}));
-    S.race.tx=hex64('tx|'+S.race.seed);
-  }
-}
-function scheduleReveals(){
-  var G=S.game;
-  G.seats.forEach(function(s,i){
-    if(s.you) return;
-    later(function(){ s.revealed=true; checkAllRevealed(); refreshReveal(); },1400+i*1000+rnd(0,900));
-  });
-}
-function revealMine(){
-  fakeTx($('#revealBtn'),['Confirm in your wallet…','Revealing on Base…'],function(){
-    S.game.you.revealed=true; checkAllRevealed(); refreshReveal();
-  });
-}
 
 /* race */
 VIEWFN.race=function(){
-  var G=S.game, n=G.seats.length, rows='';
+  var G=S.game, n=S.raceSeats.length, rows='';
   for(var i=0;i<n;i++){
-    var s=G.seats[i];
+    var s=S.raceSeats[i];
     rows+='<div class="brow" id="br'+i+'" style="transform:translateY('+(i*44)+'px)"><span class="pos mono">–</span><span class="no" style="background:'+s.silks.c1+'">'+(i+1)+'</span><span class="nm">'+esc(s.name)+'</span><span class="bst"></span><span class="gap mono"></span></div>';
   }
   return '<div class="stagehead"><h2>'+G.code+' · 6 furlongs</h2><span class="mono">Going: good to firm · '+pool()+' USDC to the winner</span></div>'+
@@ -693,14 +672,14 @@ function geo(W,n){
   return {W:W,n:n,narrow:narrow,laneH:laneH,top:top,left:left,finishX:W-right,s:laneH/54,H:top+n*laneH+22};
 }
 INIT.race=function(){
-  var R=S.race, G=S.game, n=G.seats.length, rows=R.rows;
+  var R=S.race, G=S.game, n=S.raceSeats.length, rows=R.rows;
   var cv=$('#track'), wrap=cv.parentElement, ctx=cv.getContext('2d'), dpr=Math.min(2,window.devicePixelRatio||1), g;
   function setup(){ var W=Math.max(300,Math.floor(wrap.clientWidth)); g=geo(W,n); cv.width=Math.round(W*dpr); cv.height=Math.round(g.H*dpr); cv.style.height=g.H+'px'; ctx.setTransform(dpr,0,0,dpr,0,0); }
   setup();
   var C=themeColors(), fr=0, tote=$('#tote'), lastBoard=0;
   var winnerT=R.order[0].T, close=n>1&&(R.order[1].T-R.order[0].T)<0.35;
   var st={tau:-3,msgs:[],lastMsg:-9,prevRank:null,prevIdx:null,fin:rows.map(function(){return false;}),nFin:0,ph:rows.map(function(){return 0;}),dust:[],conf:[],flash:0,half:false,last:false,slow:false};
-  var nm=function(i){return G.seats[i].name;};
+  var nm=function(i){return S.raceSeats[i].name;};
   function say(t){ st.msgs.unshift(t); st.msgs=st.msgs.slice(0,3); st.lastMsg=st.tau; tote.innerHTML=st.msgs.map(function(m,k){return '<span class="l'+k+'">'+esc(m)+'</span>';}).join(''); }
   function laneGround(i){ return g.top+i*g.laneH+g.laneH-5; }
 
@@ -745,7 +724,7 @@ INIT.race=function(){
         st.fin[i]=true; st.nFin++;
         if(r.rank===1){
           say(n>1?nm(i)+' wins by '+marginText(r,R.order[1])+'!':nm(i)+' wins!'); st.flash=1;
-          if(!RM){ var cnt=G.seats[i].you?130:70; for(var c=0;c<cnt;c++){ st.conf.push({x:g.finishX+rnd(-40,40),y:g.top-10,vx:rnd(-160,160),vy:rnd(-260,-40),rot:rnd(0,6),vr:rnd(-8,8),col:c%2?G.seats[i].silks.c1:G.seats[i].silks.c2,life:rnd(2,3.6)}); } }
+          if(!RM){ var cnt=S.raceSeats[i].you?130:70; for(var c=0;c<cnt;c++){ st.conf.push({x:g.finishX+rnd(-40,40),y:g.top-10,vx:rnd(-160,160),vy:rnd(-260,-40),rot:rnd(0,6),vr:rnd(-8,8),col:c%2?S.raceSeats[i].silks.c1:S.raceSeats[i].silks.c2,life:rnd(2,3.6)}); } }
         } else if(r.rank<=3){ say(nm(i)+' takes '+ord(r.rank)); }
       }
     });
@@ -768,7 +747,7 @@ INIT.race=function(){
     ctx.beginPath(); ctx.moveTo(g.left-9,y0+6); ctx.lineTo(g.left-9,y1-2); ctx.stroke();
     if(open<1){ ctx.globalAlpha=1-open; ctx.strokeStyle='#e8eee9'; ctx.lineWidth=2; for(var d=0;d<n;d++){ var dy=g.top+d*g.laneH; ctx.beginPath(); ctx.moveTo(g.left-7,dy+8); ctx.lineTo(g.left-7,dy+g.laneH-3); ctx.stroke(); } ctx.globalAlpha=1; }
     // lane plates
-    if(!g.narrow){ for(var pl=0;pl<n;pl++){ var py=g.top+pl*g.laneH+(g.laneH-18)/2; ctx.fillStyle=G.seats[pl].silks.c1; ctx.fillRect(6,py,18,18); ctx.fillStyle='#fff'; ctx.font='900 14px "Big Shoulders Display",Impact,sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(String(pl+1),15,py+9.5); } }
+    if(!g.narrow){ for(var pl=0;pl<n;pl++){ var py=g.top+pl*g.laneH+(g.laneH-18)/2; ctx.fillStyle=S.raceSeats[pl].silks.c1; ctx.fillRect(6,py,18,18); ctx.fillStyle='#fff'; ctx.font='900 14px "Big Shoulders Display",Impact,sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(String(pl+1),15,py+9.5); } }
     // finish line
     for(var cy=y0,ci=0;cy<y1;cy+=8,ci++){ ctx.fillStyle=ci%2?'#111':'#fff'; ctx.fillRect(g.finishX,cy,4,Math.min(8,y1-cy)); ctx.fillStyle=ci%2?'#fff':'#111'; ctx.fillRect(g.finishX+4,cy,4,Math.min(8,y1-cy)); }
     ctx.fillStyle=C.accent; ctx.font='900 12px "Big Shoulders Display",Impact,sans-serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillText('FINISH',g.finishX+4,y0-16);
@@ -778,12 +757,12 @@ INIT.race=function(){
     for(var i2=0;i2<n;i2++){
       var nose=g.left+(g.finishX-g.left)*P[i2]+B[i2], cx=nose-38*g.s, gy=laneGround(i2);
       var m=Math.min(1,V[i2]*1.1);
-      drawHorse(ctx,cx,gy,g.s,st.ph[i2],m,G.seats[i2].silks,i2+1);
+      drawHorse(ctx,cx,gy,g.s,st.ph[i2],m,S.raceSeats[i2].silks,i2+1);
       var tail=cx-33*g.s-5;
       if(tau>0.3){
         ctx.font='700 '+(g.narrow?10:11)+'px "Hanken Grotesk",sans-serif'; ctx.textAlign='right'; ctx.textBaseline='middle';
-        var tw=ctx.measureText(G.seats[i2].name).width;
-        if(tail-tw>4&&!st.fin[i2]){ ctx.lineWidth=3; ctx.strokeStyle='rgba(0,0,0,.45)'; ctx.strokeText(G.seats[i2].name,tail,gy-16*g.s); ctx.fillStyle='#fff'; ctx.fillText(G.seats[i2].name,tail,gy-16*g.s); }
+        var tw=ctx.measureText(S.raceSeats[i2].name).width;
+        if(tail-tw>4&&!st.fin[i2]){ ctx.lineWidth=3; ctx.strokeStyle='rgba(0,0,0,.45)'; ctx.strokeText(S.raceSeats[i2].name,tail,gy-16*g.s); ctx.fillStyle='#fff'; ctx.fillText(S.raceSeats[i2].name,tail,gy-16*g.s); }
       }
       if(st.fin[i2]){
         var rk=rows[i2].rank, label=ord(rk); ctx.font='900 13px "Big Shoulders Display",Impact,sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
@@ -819,99 +798,439 @@ INIT.race=function(){
   });
 };
 
-/* result */
-function settle(){
-  if(S.settled) return; S.settled=true;
-  var w=S.race.order[0]; if(S.game.seats[w.idx].you) S.wallet.bal=Math.round((S.wallet.bal+pool())*100)/100;
-  renderWallet();
+
+/* ====== views ====== */
+var norm=function(s){return String(s).trim().replace(/\s+/g,' ');};
+function validateName(v,players){
+  if(v.length<2) return 'Use at least 2 characters.';
+  if(v.length>18) return 'Keep it to 18 characters.';
+  if(!/^[A-Za-z0-9 '\-]+$/.test(v)) return 'Letters, numbers, spaces, apostrophes and hyphens only.';
+  if(players&&players.some(function(p){return p.name.toLowerCase()===v.toLowerCase();})) return 'Another horse in this race already has that name.';
+  return '';
 }
-VIEWFN.result=function(){
-  var G=S.game, R=S.race, w=R.order[0], ws=G.seats[w.idx], n=G.seats.length;
-  var youWon=ws.you, youIdx=G.seats.indexOf(G.you), yr=R.rows[youIdx].rank;
-  var net=Math.round((youWon?pool()-G.stake:-G.stake)*100)/100;
-  var line=(n>1?'Won by '+marginText(w,R.order[1])+'. ':'')+(youWon?'That is your horse. '+pool()+' USDC is on its way to your wallet.':esc(ws.owner)+' takes the '+pool()+' USDC pool.');
-  var scoreRows=R.order.map(function(r){
-    var s=G.seats[r.idx];
-    return '<li><span class="no" style="background:'+s.silks.c1+'">'+(r.idx+1)+'</span><span class="nm">'+ord(r.rank)+' · '+esc(s.name)+'<small>'+esc(s.owner)+'</small></span><span class="tot">'+r.score.toFixed(2)+'</span>'+
-      '<div class="bar" role="img" aria-label="Roll '+r.roll.toFixed(2)+' plus boost '+r.boost.toFixed(2)+'"><i class="r" style="width:'+(r.roll/112*100)+'%"></i><i class="b" style="width:'+(r.boost/112*100)+'%"></i></div>'+
-      '<span class="split">roll '+r.roll.toFixed(2)+' + boost '+r.boost.toFixed(2)+'</span></li>';
+var STEPS=['Lobby','Stable','Gate','Reveal','Race','Result'];
+function stepIndex(){
+  if(S.route.name!=='game'||!S.game) return 0;
+  var g=S.game;
+  if(g.status===ST.OPEN) return g.me<0?1:2;
+  if(g.status===ST.REVEALING) return 3;
+  if(g.status===ST.FINAL) return S.watching?4:5;
+  return 5;
+}
+function renderFrame(){
+  var w=$('#wallet'), claim=$('#claimChip'), notice=$('#notice'), rail=$('#rail'), foot=$('#foot'), nl=$('#netLabel');
+  nl.textContent=net().name;
+  if(S.account){
+    w.hidden=false; w.innerHTML='<span>'+short(S.account)+'</span><span class="bal">'+usd(S.balance)+' USDC</span>';
+    w.title=S.providerName?'Connected with '+S.providerName:'';
+  } else w.hidden=true;
+  if(S.ready&&S.claimable>0n){ claim.hidden=false; claim.disabled=!!S.busy; claim.textContent='Claim '+usd(S.claimable)+' USDC'; } else claim.hidden=true;
+  var n=S.notice, html='';
+  if(n&&n.kind==='switch') html='<div class="warn"><span>Your wallet is on a different network. This race runs on '+esc(net().name)+'.</span><button type="button" class="btn sm" data-act="switch">Switch to '+esc(net().name)+'</button></div>';
+  if(n&&n.kind==='nocontract') html='<div class="warn bad"><span>No StableRun contract found at that address on '+esc(net().name)+'. Check the address and network in settings.</span><a class="btn sm alt" href="#/setup">Settings</a></div>';
+  if(n&&n.kind==='badtoken') html='<div class="warn bad"><span>This contract does not use Circle\'s USDC on Base. Do not join races on it unless you deployed it yourself.</span></div>';
+  notice.innerHTML=html;
+  if(S.ready&&S.route.name==='game'){
+    var i=stepIndex();
+    rail.hidden=false;
+    rail.innerHTML=STEPS.map(function(s,k){return '<li class="'+(k<i?'done':k===i?'now':'')+'"'+(k===i?' aria-current="step"':'')+'><span class="n">'+(k+1)+'</span>'+s+'</li>';}).join('');
+  } else rail.hidden=true;
+  foot.innerHTML='Network: '+esc(net().name)+(S.cfg&&S.cfg.contract?' · Contract <span class="mono">'+short(S.cfg.contract)+'</span>':'')+' · <a href="#/setup">Settings</a><br>Winners are decided by the contract from every player\'s secret, a name boost fixed by wallet and horse name, and the hash of a block mined after the last chance to reveal. Races use real USDC on Base. Play with people you trust, and only stake what you are happy to lose.';
+}
+function captureInputs(){
+  var out={}; ['createName','stakeIn','horseName','codeIn','setupContract','setupNet','restoreIn'].forEach(function(id){
+    var el=document.getElementById(id); if(el) out[id]={v:el.value,f:document.activeElement===el,s:el.selectionStart};
+  });
+  var ae=document.getElementById('approveExact'); if(ae) out.approveExact={c:ae.checked};
+  return out;
+}
+function restoreInputs(k){
+  Object.keys(k).forEach(function(id){
+    var el=document.getElementById(id); if(!el) return;
+    if(k[id].c!==undefined){ el.checked=k[id].c; return; }
+    el.value=k[id].v; if(k[id].f){ el.focus({preventScroll:true}); try{ el.setSelectionRange(k[id].s,k[id].s); }catch(e){} }
+  });
+}
+function computeSig(){
+  var g=S.game, parts=[S.ready,S.account,S.notice&&S.notice.kind,S.route.name,S.route.id,S.busy,S.watching,S.claimable>0n,String(S.balance),S.providers.length,S.booted];
+  if(g) parts.push(g.id,g.status,g.me,g.playerCount,g.revealedCount,g.seedBlock,g.winner,g.hasSecret,g.players.map(function(p){return p.revealed?1:0;}).join(''));
+  if(S.route.name==='lobby'&&S.recent) parts.push(S.recent.map(function(r){return r.id+':'+r.status+':'+r.playerCount+':'+r.seat;}).join(','));
+  return JSON.stringify(parts);
+}
+function render(){
+  if(!S.cfg) return;
+  renderFrame();
+  var sig=computeSig();
+  if(sig===S.sig){ tick(); return; }
+  S.sig=sig;
+  var keep=captureInputs(); stopLoop(); clearTimers();
+  var v=currentView();
+  $('#main').innerHTML=v.html; restoreInputs(keep);
+  if(v.init) v.init();
+  tick();
+}
+function currentView(){
+  if(S.route.name==='setup'||!S.cfg.contract) return {html:setupHtml(),init:null};
+  if(!S.booted) return {html:'<p class="sub">Loading…</p>'};
+  if(!S.account) return {html:connectHtml(),init:heroInit};
+  if(!S.ready) return {html:'<section class="panel"><h2>One step left</h2><p class="sub">'+(S.notice&&S.notice.kind==='switch'?'Switch your wallet to '+esc(net().name)+' to continue.':'Check the settings, then reload.')+'</p></section>'};
+  if(S.route.name==='lobby') return {html:lobbyHtml(),init:function(){ heroInit(); updateCreateForm(); }};
+  var g=S.game;
+  if(!g) return {html:'<section class="panel"><h2>Race #'+S.route.id+'</h2><p class="sub">'+(S.loaded?'There is no race with that number on this contract.':'Loading the race…')+'</p><div class="actions"><a class="btn alt" href="#/">Back to the lobby</a></div></section>'};
+  if(g.status===ST.OPEN&&g.me<0) return {html:joinHtml(g),init:joinInit};
+  if(g.status===ST.OPEN) return {html:gateHtml(g)};
+  if(g.status===ST.REVEALING) return {html:revealHtml(g)};
+  if(g.status===ST.FINAL&&S.watching&&S.race) return {html:VIEWFN.race(),init:INIT.race};
+  if(g.status===ST.FINAL) return {html:resultHtml(g)};
+  return {html:cancelledHtml(g)};
+}
+
+/* ----- setup and connect ----- */
+function setupHtml(){
+  var c=S.cfg;
+  return '<section class="panel" style="max-width:640px"><h2>Settings</h2><p class="sub">Paste the address of your deployed StableRun contract and choose the network it lives on.</p>'+
+    '<label class="lab" for="setupNet">Network</label><select id="setupNet"><option value="8453"'+(c.chainId===8453?' selected':'')+'>Base (real USDC)</option><option value="84532"'+(c.chainId===84532?' selected':'')+'>Base Sepolia (test)</option></select>'+
+    '<div class="field"><label class="lab" for="setupContract">Contract address</label><input type="text" id="setupContract" placeholder="0x…" autocomplete="off" spellcheck="false" value="'+esc(c.contract)+'"></div>'+
+    '<p class="msg" id="setupMsg"></p><div class="actions"><button type="button" class="btn hot" data-act="saveSetup">Save and continue</button>'+(c.contract?'<a class="btn alt" href="#/">Cancel</a>':'')+'</div>'+
+    '<p class="note">The contract holds players\' USDC while a race runs. It has no owner and no admin, so what you deploy is what everyone gets. Anyone with this page can use any contract address, so only join races on contracts you trust.</p></section>';
+}
+function connectHtml(){
+  var list=S.providers.length?S.providers.map(function(p,i){return '<button type="button" class="btn'+(i===0?' hot':' alt')+'" data-act="connect" data-i="'+i+'">Connect '+esc(p.info.name)+'</button>';}).join(''):
+    '<p class="msg bad">No wallet found in this browser. Install MetaMask, Coinbase Wallet or Rabby, or open this page inside your wallet\'s built-in browser.</p>';
+  return '<section class="hero"><h1>Name a horse.<br><em>Win the pool.</em></h1><p class="lede">Friends enter a race with USDC, each backing a horse they name themselves. The contract picks the winner and pays out. Connect a wallet to see open races or start your own.</p><div class="actions">'+list+'</div><div class="banner"><canvas id="heroCv" aria-label="Horses running laps on a turf track"></canvas></div></section>';
+}
+
+/* ----- lobby ----- */
+function lobbyHtml(){
+  var d=S.draft;
+  var recent=S.recent===null?'<p class="sub">Loading races…</p>':!S.recent.length?'<p class="sub">No races yet. Start the first one.</p>':
+    '<ul class="list">'+S.recent.map(function(r){
+      var label='Open', cls='alt';
+      if(r.status===ST.OPEN) label=r.seat? 'Open':'Join';
+      else if(r.status===ST.REVEALING) label=r.seat?'Reveal':'View';
+      else if(r.status===ST.FINAL) label='Result';
+      else label='Cancelled';
+      var dots=''; for(var k=0;k<r.maxPlayers;k++) dots+='<i class="d'+(k<r.playerCount?' on':'')+'"></i>';
+      var st=r.status===ST.OPEN?'Open':r.status===ST.REVEALING?'Revealing':r.status===ST.FINAL?'Finished':'Cancelled';
+      return '<li class="open"><div><b class="mono">#'+r.id+'</b><small>'+usd(r.stake)+' USDC · '+st+(r.seat?' · you are in':'')+'</small></div><span class="dots" role="img" aria-label="'+r.playerCount+' of '+r.maxPlayers+' seats taken">'+dots+'</span><button type="button" class="btn alt sm" data-act="openGame" data-id="'+r.id+'">'+label+'</button></li>';
+    }).join('')+'</ul>';
+  return '<section class="hero"><h1>Name a horse.<br><em>Win the pool.</em></h1>'+
+    '<p class="lede">Friends enter a race with USDC, each backing a horse they name themselves. Everyone\'s secret feeds the race roll, and your wallet plus the name sets a speed boost nobody sees until the race is over. The contract picks the winner and pays out.</p>'+
+    '<div class="banner"><canvas id="heroCv" aria-label="Horses running laps on a turf track"></canvas></div></section>'+
+    '<div class="grid2"><section class="panel"><h2>Start a race</h2><p class="sub">You set the field size and the stake. Everyone pays the same, and you enter with the first horse.</p>'+
+      '<span class="lab" id="nLab">Horses in the race</span><div class="stepper" role="group" aria-labelledby="nLab"><button type="button" data-act="n-dec" aria-label="One fewer horse">−</button><output id="nVal">'+d.n+'</output><button type="button" data-act="n-inc" aria-label="One more horse">+</button></div>'+
+      '<div class="field"><label class="lab" for="stakeIn">Stake per player (USDC)</label><input type="text" id="stakeIn" inputmode="decimal" autocomplete="off" value="'+esc(d.stake)+'" placeholder="Any amount, minimum 0.01"><div class="chips" role="group" aria-label="Quick amounts" style="margin-top:10px">'+
+      [1,5,10,25].map(function(v){return '<button type="button" class="chip" data-act="stake" data-v="'+v+'">'+v+'</button>';}).join('')+'</div></div>'+
+      '<div class="field"><label class="lab" for="createName">Your horse name</label><input type="text" id="createName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Try a name" value="'+esc(d.name)+'"></div>'+
+      '<p class="msg" id="createMsg"></p><p class="sum" id="createSum"></p>'+
+      '<div class="actions"><button type="button" class="btn hot" data-act="create" id="createBtn">Open the stalls</button></div>'+
+      '<label class="check"><input type="checkbox" id="approveExact"'+(S.approveExact?' checked':'')+'> Approve only this race\'s stake instead of a one-time unlimited USDC approval</label>'+
+      '<p class="note">First time, your wallet asks you to approve USDC, then to create and enter. After that it is one signature.</p></section>'+
+    '<section class="panel"><h2>Recent races</h2><p class="sub">Open a race to join or watch it.</p>'+recent+
+      '<div class="codeform"><input type="text" id="codeIn" placeholder="Race number, e.g. 12" maxlength="8" autocomplete="off" inputmode="numeric" aria-label="Race number"><button type="button" class="btn alt" data-act="findGame">Open</button></div></section></div>'+
+    '<ol class="how"><li><span class="k">ENTER</span><b>Name your horse</b><span>Pay the stake in USDC. Your wallet and the name fix its boost, hidden until the end.</span></li>'+
+      '<li><span class="k">SEAL</span><b>Commit a secret</b><span>Only a hash of your secret goes on chain, so nobody can steer the roll.</span></li>'+
+      '<li><span class="k">REVEAL</span><b>Show your secret</b><span>Once the stalls are full you have 15 minutes. Miss it and your stake goes to the pot.</span></li>'+
+      '<li><span class="k">RACE</span><b>Press Start race</b><span>Anyone can. The result uses a block mined after the last reveal, so nobody can know it in advance.</span></li></ol>';
+}
+function createCheck(){
+  var d=S.draft, stakeU=parseUsd(d.stake), name=norm(d.name), msg='', ok=true;
+  if(stakeU===null){ ok=false; msg='Enter a stake of at least 0.01 USDC, with up to 6 decimals.'; }
+  else if(name){ var e=validateName(name,null); if(e){ ok=false; msg=e; } }
+  else { ok=false; msg=''; }
+  if(ok&&S.balance<stakeU){ ok=false; msg='Your wallet has '+usd(S.balance)+' USDC. You need '+usd(stakeU)+'.'; }
+  return {ok:ok,msg:msg,stakeU:stakeU,name:name};
+}
+function updateCreateForm(){
+  var c=createCheck(), sum=$('#createSum'); if(!sum) return;
+  $('#nVal').textContent=S.draft.n;
+  $('#createMsg').textContent=c.msg; $('#createMsg').className='msg'+(c.msg?' bad':'');
+  sum.innerHTML=c.stakeU!==null?'Pool <b>'+usd(c.stakeU*BigInt(S.draft.n))+' USDC</b> · winner takes all · 6 furlongs':'';
+  var b=$('#createBtn'); b.disabled=!c.ok||!!S.busy; b.textContent=S.busy?S.busy:'Open the stalls';
+  document.querySelectorAll('[data-act=stake]').forEach(function(x){x.setAttribute('aria-pressed',String(parseUsd(S.draft.stake)===BigInt(x.dataset.v)*1000000n));});
+}
+
+/* ----- seats / racecard ----- */
+function seatsHtml(g,mode){
+  var h='';
+  for(var i=0;i<g.maxPlayers;i++){
+    var p=g.players[i];
+    if(!p){ h+='<li class="seat empty"><span class="no">'+(i+1)+'</span><div class="who"><b>Stall '+(i+1)+'</b><small>Waiting for a friend</small></div></li>'; continue; }
+    var sk=silksFor(p.wallet,p.name), tag='';
+    if(g.status===ST.REVEALING) tag=p.revealed?'<span class="tag ok">Revealed</span>':'<span class="tag">Sealed</span>';
+    if(g.status===ST.OPEN) tag='<span class="tag">Sealed</span>';
+    if(g.status===ST.FINAL) tag=p.revealed?'':'<span class="tag">Forfeited</span>';
+    var boost=g.status===ST.FINAL&&p.revealed?'<span class="boost" title="Name boost">+'+(p.boost/100).toFixed(2)+'</span>':'';
+    h+='<li class="seat'+(p.wallet===S.account?' you':'')+'"><span class="no" style="background:'+sk.c1+'">'+(i+1)+'</span><div class="who"><b>'+esc(p.name)+'</b><small>'+short(p.wallet)+'</small></div>'+boost+tag+'</li>';
+  }
+  return h;
+}
+function factsHtml(g){
+  return '<dl class="facts" style="margin-top:12px"><dt>Race</dt><dd>#'+g.id+'</dd><dt>Distance</dt><dd>6 furlongs</dd><dt>Stake</dt><dd>'+usd(g.stake)+' USDC</dd><dt>Pool</dt><dd>'+usd(g.stake*BigInt(g.maxPlayers))+' USDC</dd><dt>Host</dt><dd>'+short(g.host)+'</dd></dl>';
+}
+
+/* ----- join (stable) ----- */
+function joinHtml(g){
+  return '<div class="grid-main"><section class="panel"><h2>Enter race #'+g.id+'</h2>'+
+    '<p class="sub">Your horse\'s boost is fixed by your wallet and its name, and nobody sees it until the race is over. Pick a name you like, then enter.</p>'+
+    '<label class="lab" for="horseName">Horse name</label><div class="row"><input type="text" id="horseName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Try a name"><button type="button" class="btn alt" data-act="rand">Random</button></div>'+
+    '<p class="msg" id="nameMsg"></p>'+
+    '<div class="preview"><canvas id="prevCv" aria-label="Preview of your horse in its silks"></canvas><div class="boostbox"><span class="lab">Name boost</span><div class="big mono">?</div><p class="note" style="margin:10px 0 0">Sealed until the race ends. Every name is a gamble.</p></div></div>'+
+    '<div class="actions"><button type="button" class="btn hot" data-act="join" id="joinBtn" disabled>Enter race · '+usd(g.stake)+' USDC</button></div>'+
+    '<label class="check"><input type="checkbox" id="approveExact"'+(S.approveExact?' checked':'')+'> Approve only this race\'s stake instead of a one-time unlimited USDC approval</label>'+
+    '<p class="note">First time, your wallet asks you to approve USDC, then to enter. After that it is one signature.</p></section>'+
+    '<aside class="panel"><h2>Racecard</h2>'+factsHtml(g)+'<ul class="seats" style="margin-top:12px">'+seatsHtml(g)+'</ul></aside></div>';
+}
+function joinCheck(){
+  var g=S.game, inp=$('#horseName'); if(!inp) return {ok:false};
+  var v=norm(inp.value), e=v?validateName(v,g.players):'', ok=!!v&&!e, msg=e;
+  if(ok&&S.balance<g.stake){ ok=false; msg='Your wallet has '+usd(S.balance)+' USDC. You need '+usd(g.stake)+'.'; }
+  if(ok) msg='Looks good. You will not see its boost until the race ends.';
+  return {ok:ok,msg:msg,err:!!e||(v&&!ok),name:v};
+}
+function onJoinName(){
+  var c=joinCheck(), m=$('#nameMsg'); if(!m) return;
+  m.textContent=c.msg||''; m.className='msg'+(c.err?' bad':'');
+  S.preview=c.name&&c.ok?silksFor(S.account,c.name):(c.name&&!c.err?silksFor(S.account,c.name):null);
+  var b=$('#joinBtn'); b.disabled=!c.ok||!!S.busy; b.textContent=S.busy?S.busy:'Enter race · '+usd(S.game.stake)+' USDC';
+}
+function joinInit(){
+  onJoinName();
+  var inp=$('#horseName'); if(inp&&!S.busy) inp.focus({preventScroll:true});
+  var cv=$('#prevCv'), dpr=Math.min(2,window.devicePixelRatio||1), Wd=260, H=130;
+  cv.width=Wd*dpr; cv.height=H*dpr; cv.style.aspectRatio=Wd+' / '+H;
+  var ctx=cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  var Cc=themeColors(), ph=0, fr=0;
+  startLoop(function(dt){
+    fr++; if(fr%90===0) Cc=themeColors();
+    ph+=dt*(RM?0:6);
+    ctx.fillStyle=Cc.surface; ctx.fillRect(0,0,Wd,H);
+    paintTurf(ctx,Wd,14,H-14,Cc,0); paintRails(ctx,Wd,14,H-14,Cc);
+    var sk=S.preview||{c1:'#7a8a80',c2:'#cdd6d0',pattern:0,coat:'#8b5a2b'};
+    drawHorse(ctx,118,112,1.7,ph,RM?0.4:0.7,sk,(S.game?S.game.playerCount:0)+1);
+  });
+}
+
+/* ----- gate (waiting for the stalls to fill) ----- */
+function gateHtml(g){
+  var link=location.href.split('#')[0]+'#/game/'+g.id;
+  var isHost=g.host.toLowerCase()===S.account;
+  var canCancel=isHost||chainNow()>g.joinDeadline;
+  return '<div class="grid-main"><section class="panel"><h2>The stalls</h2><p class="sub">'+g.playerCount+' of '+g.maxPlayers+' horses in. The reveal starts when the last stall fills. Closes in <span id="joinLeft" class="mono"></span>.</p><ul class="seats">'+seatsHtml(g)+'</ul></section>'+
+    '<aside class="panel"><h2>Invite friends</h2><div class="codebox"><b>#'+g.id+'</b><button type="button" class="btn alt sm" data-act="copylink">Copy link</button></div>'+
+    '<dl class="facts"><dt>Pool</dt><dd>'+usd(g.stake*BigInt(g.playerCount))+' of '+usd(g.stake*BigInt(g.maxPlayers))+' USDC</dd><dt>Stake</dt><dd>'+usd(g.stake)+' USDC</dd><dt>Field</dt><dd>'+g.maxPlayers+' horses</dd></dl>'+
+    '<p class="note">Your secret is saved in this browser. Stay on this device until the reveal, or save a backup below.</p>'+
+    '<div class="actions" style="margin-top:12px"><button type="button" class="btn alt sm" data-act="copysecret">Copy secret backup</button>'+(canCancel?'<button type="button" class="btn alt sm" data-act="cancel"'+(S.busy?' disabled':'')+'>Cancel race and refund</button>':'')+'</div>'+
+    '<p class="note">'+esc(link)+'</p></aside></div>';
+}
+
+/* ----- reveal + start ----- */
+function startState(g){
+  var now=chainNow(), everyone=g.revealedCount===g.playerCount;
+  if(!everyone&&now<=g.revealDeadline) return {can:false,label:'Start race',hint:'Waiting for '+(g.playerCount-g.revealedCount)+' more '+((g.playerCount-g.revealedCount)===1?'player':'players')+' to reveal.'};
+  if(g.revealedCount<=1) return {can:true,label:'Start race',hint:g.revealedCount===1?'Only one player revealed, so they win the pot.':'Nobody revealed, so everyone gets their stake back.'};
+  var armed=g.seedBlock!==0&&S.clock.block<=g.seedBlock+SEED_LIFETIME;
+  if(!armed) return {can:true,label:'Start race (step 1 of 2)',hint:'Some players did not reveal. This locks in the block that seeds the race. Press Start race again once it confirms.'};
+  if(S.clock.block<=g.seedBlock) return {can:false,label:'Start race',hint:'Waiting for the next block…'};
+  return {can:true,label:'Start race',hint:'Everything is in. Anyone can press this, and the race runs.'};
+}
+function revealHtml(g){
+  var me=g.me>=0?g.players[g.me]:null, now=chainNow(), open=now<=g.revealDeadline;
+  var mine='';
+  if(!me) mine='<p class="sub" style="margin-top:8px">You are watching this race. You can still press Start race when it is ready.</p>';
+  else if(me.revealed) mine='<p class="sub" style="margin-top:8px">Your secret is in. '+(g.revealedCount<g.playerCount?'Waiting for '+(g.playerCount-g.revealedCount)+' more.':'Everyone has revealed.')+'</p>';
+  else if(!open) mine='<p class="sub" style="margin-top:8px">The reveal window has closed and your stake is forfeit. Anyone can still start the race for the others.</p>';
+  else if(!g.hasSecret) mine='<p class="sub" style="margin-top:8px">This browser does not have your secret. Paste your backup to reveal.</p><input type="text" id="restoreIn" placeholder="0x… secret backup" autocomplete="off" spellcheck="false"><div class="actions"><button type="button" class="btn hot" data-act="restore">Restore and reveal</button></div>';
+  else mine='<p class="sub" style="margin-top:8px">Only a hash of your secret is on chain. Reveal to prove you chose it. <b>Do this before the timer ends or you lose your stake.</b></p><div class="bigact"><button type="button" class="btn hot" data-act="reveal" id="revealBtn"'+(S.busy?' disabled':'')+'>'+(S.busy||'Reveal my secret')+'</button></div>';
+  return '<div class="grid-main"><section class="panel"><h2>Reveal</h2><p class="sub">Each player shows the secret they sealed. Time left: <b id="cdown" class="mono"></b></p><ul class="seats">'+seatsHtml(g)+'</ul></section>'+
+    '<div class="stack"><aside class="panel"><h2>Your secret</h2>'+mine+'</aside>'+
+    '<aside class="panel"><h2>Start race</h2><p class="sub" id="startHint" style="margin-top:8px"></p><div class="bigact"><button type="button" class="btn hot" data-act="start" id="startBtn">Start race</button></div>'+
+    '<p class="note">Anyone can press this once everyone has revealed, or once the 15 minutes are up. Anyone who has not revealed by then loses their stake to the pot. The result uses a block mined after the last reveal, so nobody can know it in advance.</p></aside></div></div>';
+}
+
+/* ----- result ----- */
+function resultHtml(g){
+  var n=g.playerCount, ws=g.players.filter(function(p){return p.wallet===g.winner.toLowerCase();})[0]||{name:'?',wallet:g.winner};
+  var potU=g.stake*BigInt(n), potS=usd(potU), you=g.me>=0?g.players[g.me]:null, youWon=you&&you.wallet===g.winner.toLowerCase();
+  var ranked=g.players.map(function(p,i){return {p:p,i:i};}).filter(function(x){return x.p.revealed;}).sort(function(a,b){return b.p.score-a.p.score||a.i-b.i;});
+  var line=g.revealedCount===1?'Only '+esc(ws.name)+' revealed, so they win the pot by default.':'The winner takes the '+potS+' USDC pool.';
+  if(youWon) line+=' That is your horse. Claim your USDC below.';
+  var scoreRows=ranked.map(function(x,k){
+    var p=x.p, sk=silksFor(p.wallet,p.name);
+    var detail=g.revealedCount>1?'<div class="bar" role="img" aria-label="Roll '+(p.roll/100).toFixed(2)+' plus boost '+(p.boost/100).toFixed(2)+'"><i class="r" style="width:'+(p.roll/100/112*100)+'%"></i><i class="b" style="width:'+(p.boost/100/112*100)+'%"></i></div><span class="split">roll '+(p.roll/100).toFixed(2)+' + boost '+(p.boost/100).toFixed(2)+'</span>':'<span class="split">boost +'+(p.boost/100).toFixed(2)+'</span>';
+    return '<li><span class="no" style="background:'+sk.c1+'">'+(x.i+1)+'</span><span class="nm">'+ord(k+1)+' · '+esc(p.name)+'<small>'+short(p.wallet)+'</small></span><span class="tot">'+(g.revealedCount>1?(p.score/100).toFixed(2):'–')+'</span>'+detail+'</li>';
   }).join('');
-  var share=shareText();
-  return '<section class="winner"><span class="lab">Winner</span><div class="nmx"><i style="background:'+ws.silks.c1+'">'+(w.idx+1)+'</i>'+esc(ws.name)+'</div><p>'+line+'</p></section>'+
-    '<div class="grid-main"><section class="panel"><h2>Final scores</h2><div class="legend" style="margin-top:12px"><span><i style="background:var(--roll)"></i>Roll from the secrets</span><span><i style="background:var(--gold)"></i>Name boost</span></div><ol class="scores" style="margin:0;padding:0;list-style:none">'+scoreRows+'</ol></section>'+
-    '<div class="stack"><section class="panel"><h2>Your race</h2><div style="margin-top:12px">'+
-      '<div class="net-line"><span>Finished</span><b>'+ord(yr)+' of '+n+'</b></div>'+
-      '<div class="net-line"><span>Stake</span><span class="mono">−'+G.stake+' USDC</span></div>'+
-      '<div class="net-line"><span>Prize</span><span class="mono">'+(youWon?'+'+pool():'0')+' USDC</span></div>'+
-      '<div class="net-line"><span>Net</span><b class="mono '+(net>=0?'up':'down')+'">'+(net>=0?'+':'−')+Math.abs(net)+' USDC</b></div></div></section>'+
-    '<section class="panel"><h2>Share card</h2><p class="sub" style="margin-bottom:12px">The result everyone in the race sees.</p><pre class="share" id="shareTxt">'+esc(share)+'</pre><div class="actions" style="margin-top:0"><button type="button" class="btn alt" data-act="copyresult">Copy result</button></div></section>'+
-    '<section class="panel"><h2>How it was decided</h2><p class="sub" style="margin-bottom:12px">Anyone can recompute this from the revealed secrets.</p><p class="formula">score = roll(secrets) + boost(wallet, name)</p><p class="hash">Seed '+R.seed.slice(0,34)+'…<br>Tx '+R.tx.slice(0,34)+'…</p></section></div></div>'+
-    '<div class="actions"><button type="button" class="btn hot" data-act="newrace">Start another race</button><button type="button" class="btn alt" data-act="again">Watch it again</button></div>';
-};
-function shareText(){
-  var G=S.game, R=S.race;
-  var l=['StableRun · '+G.code+' · '+G.seats.length+' horses · '+pool()+' USDC pool',''];
-  R.order.forEach(function(r){ var s=G.seats[r.idx]; l.push(ord(r.rank)+'  '+s.name+'  '+r.score.toFixed(2)+'  ('+r.roll.toFixed(2)+' + '+r.boost.toFixed(2)+')  '+s.owner); });
-  l.push('','Seed '+R.seed.slice(0,18)+'…');
+  var forf=g.players.filter(function(p){return !p.revealed;}).map(function(p){return '<li class="forf"><span class="nm">'+esc(p.name)+'<small>'+short(p.wallet)+'</small></span><span class="tag">Forfeited</span></li>';}).join('');
+  var yr=ranked.findIndex(function(x){return you&&x.p.wallet===you.wallet;});
+  var net=you?(youWon?potU-g.stake:-g.stake):0n;
+  var mine=you?'<section class="panel"><h2>Your race</h2><div style="margin-top:12px"><div class="net-line"><span>Finished</span><b>'+(you.revealed?ord(yr+1)+' of '+g.revealedCount:'Forfeited')+'</b></div><div class="net-line"><span>Stake</span><span class="mono">−'+usd(g.stake)+' USDC</span></div><div class="net-line"><span>Prize</span><span class="mono">'+(youWon?'+'+potS:'0')+' USDC</span></div><div class="net-line"><span>Net</span><b class="mono '+(net>=0n?'up':'down')+'">'+(net>=0n?'+':'−')+usd(net<0n?-net:net)+' USDC</b></div></div></section>':'';
+  return '<section class="winner"><span class="lab">Winner</span><div class="nmx"><i style="background:'+silksFor(ws.wallet,ws.name).c1+'">'+(g.players.indexOf(ws)+1)+'</i>'+esc(ws.name)+'</div><p>'+line+'</p></section>'+
+    '<div class="grid-main"><section class="panel"><h2>Final scores</h2>'+(g.revealedCount>1?'<div class="legend" style="margin-top:12px"><span><i style="background:var(--roll)"></i>Roll from the secrets</span><span><i style="background:var(--gold)"></i>Name boost</span></div>':'')+'<ol class="scores" style="margin:12px 0 0;padding:0;list-style:none">'+scoreRows+'</ol>'+(forf?'<ul class="list forfs">'+forf+'</ul>':'')+'</section>'+
+    '<div class="stack">'+mine+
+    '<section class="panel"><h2>Share card</h2><p class="sub" style="margin-bottom:12px">The result everyone in the race sees.</p><pre class="share" id="shareTxt">'+esc(shareText(g,ranked))+'</pre><div class="actions" style="margin-top:0"><button type="button" class="btn alt" data-act="copyresult">Copy result</button><button type="button" class="btn alt" data-act="copylink">Copy link</button></div></section>'+
+    '<section class="panel"><h2>How it was decided</h2><p class="sub" style="margin-bottom:12px">Anyone can recompute this from the contract.</p><p class="formula">score = roll(secrets + block hash) + boost(wallet, name)</p><p class="hash">'+(g.revealedCount>1?'Seed '+g.seed.slice(0,34)+'…<br>Seed block '+g.seedBlock:'No roll needed: fewer than two players revealed.')+'</p></section></div></div>'+
+    '<div class="actions">'+(S.claimable>0n?'<button type="button" class="btn hot" data-act="claim"'+(S.busy?' disabled':'')+'>'+(S.busy||'Claim '+usd(S.claimable)+' USDC')+'</button>':'')+(g.revealedCount>=2?'<button type="button" class="btn alt" data-act="watch">Watch the race</button>':'')+'<a class="btn alt" href="#/">Back to the lobby</a></div>';
+}
+function shareText(g,ranked){
+  var l=['StableRun · #'+g.id+' · '+g.playerCount+' horses · '+usd(g.stake*BigInt(g.playerCount))+' USDC pool',''];
+  ranked.forEach(function(x,k){ var p=x.p; l.push(ord(k+1)+'  '+p.name+'  '+(g.revealedCount>1?(p.score/100).toFixed(2)+'  ('+(p.roll/100).toFixed(2)+' + '+(p.boost/100).toFixed(2)+')  ':'')+short(p.wallet)); });
+  g.players.forEach(function(p){ if(!p.revealed) l.push('DNR  '+p.name+'  (forfeited)  '+short(p.wallet)); });
+  l.push('','Seed '+g.seed.slice(0,18)+'…');
   return l.join('\n');
 }
-INIT.result=function(){ settle(); };
-
-/* ---------- actions ---------- */
-var ACT={
-  'n-dec':function(){ S.draft.n=Math.max(2,S.draft.n-1); updateCreateSum(); },
-  'n-inc':function(){ S.draft.n=Math.min(8,S.draft.n+1); updateCreateSum(); },
-  'stake':function(el){ $('#stakeIn').value=el.dataset.v; readStake(); },
-  'create':function(){ if(!S.draft.stake) return; S.game=newGame({code:genCode(),n:S.draft.n,stake:S.draft.stake,host:'You',taken:0}); S.race=null; S.settled=false; go('stable'); },
-  'join':function(el){ var o=OPEN[+el.dataset.i]; startOpen(o); },
-  'joincode':function(){
-    var v=($('#codeIn').value||'').trim().toUpperCase(), o=OPEN.filter(function(x){return x.code===v;})[0];
-    if(o) startOpen(o); else toast('No open race with that code. Try RUN-4F7K.');
-  },
-  'switch':function(){
-    var fresh=S.view==='lobby'||(S.view==='stable'&&S.game&&!S.game.you);
-    if(!fresh){ toast('Switch wallets between races.'); return; }
-    S.wallet={addr:newAddr(),bal:250}; renderWallet();
-    if(S.view==='stable'){ renderTried(); onName(); }
-    toast('New demo wallet. The same name now gives a different boost.');
-  },
-  'rand':function(){
-    var used=S.game.seats.map(function(s){return s.name.toLowerCase();}), nm;
-    do{nm=pick(HORSES);}while(used.indexOf(nm.toLowerCase())>=0);
-    var inp=$('#horseName'); inp.value=nm; onName(); inp.focus({preventScroll:true});
-  },
-  'note':function(){ noteName(); },
-  'tried':function(el){ var inp=$('#horseName'); inp.value=el.dataset.name; onName(); inp.focus({preventScroll:true}); },
-  'enter':function(){ enterRace(); },
-  'copycode':function(){ copyText(S.game.code,'Race code copied'); },
-  'fill':function(){ fillNow(); },
-  'reveal':function(){ revealMine(); },
-  'watch':function(el){ fakeTx(el,['Confirm in your wallet…','Starting the race…'],function(){ go('race'); }); },
-  'skip':function(){
-    var G=S.game;
-    if(!S.race){ G.seats.forEach(function(s){s.revealed=true;}); checkAllRevealed(); }
-    go('result');
-  },
-  'result':function(){ go('result'); },
-  'again':function(){ go('race'); },
-  'newrace':function(){ S.game=null; S.race=null; S.settled=false; go('lobby'); },
-  'copyresult':function(){ copyText(shareText(),'Result copied'); }
-};
-function startOpen(o){
-  S.game=newGame({code:o.code,n:o.n,stake:o.stake,host:o.host,taken:o.taken}); S.race=null; S.settled=false; go('stable');
+function cancelledHtml(g){
+  return '<section class="panel" style="max-width:640px"><h2>Race #'+g.id+' was cancelled</h2><p class="sub">'+(g.playerCount?'Every stake was refunded.':'Nobody had joined.')+(S.claimable>0n?' Claim your USDC below.':'')+'</p><div class="actions">'+(S.claimable>0n?'<button type="button" class="btn hot" data-act="claim"'+(S.busy?' disabled':'')+'>'+(S.busy||'Claim '+usd(S.claimable)+' USDC')+'</button>':'')+'<a class="btn alt" href="#/">Back to the lobby</a></div></section>';
 }
+
+/* ----- clock-driven bits ----- */
+function tick(){
+  var g=S.game; if(!g) return;
+  var now=chainNow();
+  if(g.status===ST.OPEN){ var jl=$('#joinLeft'); if(jl) jl.textContent=now>g.joinDeadline?'now (anyone can cancel)':hms(g.joinDeadline-now); }
+  if(g.status===ST.REVEALING){
+    var cd=$('#cdown'); if(cd) cd.textContent=now>g.revealDeadline?'0:00 (closed)':mmss(g.revealDeadline-now);
+    var sb=$('#startBtn'), sh=$('#startHint');
+    if(sb){ var s=startState(g); sb.disabled=!s.can||!!S.busy; sb.textContent=S.busy||s.label; if(sh) sh.textContent=s.hint; }
+    var rb=$('#revealBtn'); if(rb&&now>g.revealDeadline) rb.disabled=true;
+  }
+}
+
+/* ====== actions ====== */
+async function run(fn){ try{ await fn(); } catch(e){ toast(e&&e.message?e.message:String(e)); setBusy(''); } }
+async function ensureFunds(needU){
+  await refreshBalances();
+  if(S.balance<needU) throw new Error('You need '+usd(needU)+' USDC. Your wallet has '+usd(S.balance)+'.');
+  var al=BigInt(await ethCall(S.usdc,SEL.allowance+addrW(S.account)+addrW(S.cfg.contract)));
+  if(al<needU) await send(S.usdc,SEL.approve+addrW(S.cfg.contract)+W(S.approveExact?needU:MAXU),'Approve USDC');
+}
+async function commitFor(id,secret){
+  var out=await ethCall(S.cfg.contract,SEL.commitHash+W(id)+addrW(S.account)+secret.slice(2));
+  return out.slice(2);
+}
+async function doCreate(){
+  var c=createCheck(); if(!c.ok) throw new Error(c.msg||'Check the form.');
+  await ensureFunds(c.stakeU);
+  var id=BigInt(await ethCall(S.cfg.contract,SEL.nextGameId)), secret=randomSecret(), commit=await commitFor(id,secret);
+  saveSecret(String(id),secret);
+  await send(S.cfg.contract,SEL.createAndJoin+W(id)+W(c.stakeU)+W(S.draft.n)+W(160)+commit+encStr(c.name),'Creating your race');
+  toast('Race #'+id+' is open. Share the link with friends.');
+  S.draft.name='';
+  location.hash='#/game/'+id;
+}
+async function doJoin(){
+  var g=S.game, c=joinCheck(); if(!c.ok) throw new Error(c.msg||'Check the name.');
+  await ensureFunds(g.stake);
+  var secret=randomSecret(), commit=await commitFor(g.id,secret);
+  saveSecret(String(g.id),secret);
+  await send(S.cfg.contract,SEL.join+W(g.id)+W(96)+commit+encStr(c.name),'Entering the race');
+  await refreshAll(); S.sig=''; render();
+}
+async function doReveal(secret){
+  var g=S.game;
+  await send(S.cfg.contract,SEL.reveal+W(g.id)+secret.slice(2),'Revealing');
+  await refreshAll(); S.sig=''; render();
+}
+async function doStart(){
+  var g=S.game; await refreshClock();
+  await send(S.cfg.contract,SEL.startRace+W(g.id),'Starting the race');
+  await refreshAll(); S.sig='';
+  if(S.game&&S.game.status===ST.FINAL&&S.game.revealedCount>=2) S.watching=true;
+  render();
+}
+async function doClaim(){
+  await send(S.cfg.contract,SEL.claim,'Claiming');
+  toast('Claimed. USDC is on its way to your wallet.');
+  await refreshAll(); S.sig=''; render();
+}
+async function doCancel(){
+  await send(S.cfg.contract,SEL.cancel+W(S.game.id),'Cancelling');
+  await refreshAll(); S.sig=''; render();
+}
+var ACT={
+  'connect':function(el){ run(async function(){ var d=S.providers[+el.dataset.i]; if(await useProvider(d,true)) await afterConnect(); S.sig=''; render(); }); },
+  'switch':function(){ switchChain(); },
+  'saveSetup':function(){
+    var a=($('#setupContract').value||'').trim(), m=$('#setupMsg');
+    if(!/^0x[0-9a-fA-F]{40}$/.test(a)){ m.textContent='That does not look like a contract address.'; m.className='msg bad'; return; }
+    S.cfg={contract:a,chainId:+$('#setupNet').value}; saveCfg(); location.hash='#/'; location.reload();
+  },
+  'n-dec':function(){ S.draft.n=Math.max(2,S.draft.n-1); updateCreateForm(); },
+  'n-inc':function(){ S.draft.n=Math.min(8,S.draft.n+1); updateCreateForm(); },
+  'stake':function(el){ S.draft.stake=el.dataset.v; $('#stakeIn').value=el.dataset.v; updateCreateForm(); },
+  'create':function(){ run(doCreate); },
+  'join':function(){ run(doJoin); },
+  'rand':function(){
+    var used=S.game.players.map(function(p){return p.name.toLowerCase();}), nm;
+    do{ nm=pick(HORSES); }while(used.indexOf(nm.toLowerCase())>=0);
+    var inp=$('#horseName'); inp.value=nm; onJoinName(); inp.focus({preventScroll:true});
+  },
+  'reveal':function(){ var s=loadSecret(String(S.game.id)); if(!s){ toast('This browser does not have your secret.'); return; } run(function(){ return doReveal(s); }); },
+  'restore':function(){
+    var v=($('#restoreIn').value||'').trim();
+    if(!/^0x[0-9a-fA-F]{64}$/.test(v)){ toast('A secret backup is 0x followed by 64 characters.'); return; }
+    saveSecret(String(S.game.id),v); run(function(){ return doReveal(v); });
+  },
+  'start':function(){ run(doStart); },
+  'claim':function(){ run(doClaim); },
+  'cancel':function(){ run(doCancel); },
+  'openGame':function(el){ location.hash='#/game/'+el.dataset.id; },
+  'findGame':function(){ var v=($('#codeIn').value||'').replace(/\D/g,''); if(!v){ toast('Enter a race number.'); return; } location.hash='#/game/'+v; },
+  'copylink':function(){ copyText(location.href.split('#')[0]+'#/game/'+S.game.id,'Link copied'); },
+  'copysecret':function(){ var s=loadSecret(String(S.game.id)); if(!s){ toast('No secret saved in this browser.'); return; } copyText(s,'Secret backup copied. Keep it private until the reveal.'); },
+  'copyresult':function(){ var el=$('#shareTxt'); if(el) copyText(el.textContent,'Result copied'); },
+  'watch':function(){ if(S.race){ S.watching=true; S.sig=''; render(); } },
+  'result':function(){ S.watching=false; S.sig=''; render(); },
+  'skip':function(){ S.watching=false; S.sig=''; render(); }
+};
 document.addEventListener('click',function(e){
   var el=e.target.closest('[data-act]'); if(!el||el.disabled) return;
   var f=ACT[el.dataset.act]; if(f) f(el);
 });
-document.addEventListener('input',function(e){ if(e.target&&e.target.id==='horseName') onName(); if(e.target&&e.target.id==='stakeIn') readStake(); });
+$('#claimChip').addEventListener('click',function(){ run(doClaim); });
+$('#wallet').addEventListener('click',function(){ toast(S.providerName?('Connected with '+S.providerName+'. Switch accounts in your wallet.'):'Wallet connected.'); });
+document.addEventListener('input',function(e){
+  var id=e.target&&e.target.id;
+  if(id==='horseName') onJoinName();
+  if(id==='stakeIn'){ S.draft.stake=e.target.value; updateCreateForm(); }
+  if(id==='createName'){ S.draft.name=e.target.value; updateCreateForm(); }
+  if(id==='approveExact') S.approveExact=e.target.checked;
+});
+document.addEventListener('change',function(e){ if(e.target&&e.target.id==='approveExact') S.approveExact=e.target.checked; });
 document.addEventListener('keydown',function(e){
-  if(e.key==='Enter'&&e.target&&e.target.id==='horseName'){ e.preventDefault(); var eb=$('#enterBtn'); if(eb&&!eb.disabled) enterRace(); }
-  if(e.key==='Enter'&&e.target&&e.target.id==='codeIn'){ e.preventDefault(); ACT.joincode(); }
+  if(e.key!=='Enter') return;
+  var id=e.target&&e.target.id;
+  if(id==='horseName'){ e.preventDefault(); var b=$('#joinBtn'); if(b&&!b.disabled) run(doJoin); }
+  if(id==='createName'||id==='stakeIn'){ e.preventDefault(); var c=$('#createBtn'); if(c&&!c.disabled) run(doCreate); }
+  if(id==='codeIn'){ e.preventDefault(); ACT.findGame(); }
 });
 
-go('lobby');
+/* ====== routing and boot ====== */
+function parseRoute(){
+  var h=location.hash||'', m=h.match(/^#\/game\/(\d+)$/);
+  if(m) return {name:'game',id:parseInt(m[1],10)};
+  if(h==='#/setup') return {name:'setup'};
+  return {name:'lobby'};
+}
+async function onRoute(){
+  S.route=parseRoute(); S.game=null; S.watching=false; S.sig=''; S.loaded=false; S.recent=null;
+  render();
+  if(S.ready){ try{ await refreshAll(); }catch(e){} S.loaded=true; S.sig=''; render(); }
+}
+async function boot(){
+  S.cfg=loadCfg(); S.route=parseRoute();
+  window.addEventListener('hashchange',onRoute);
+  render();
+  if(S.cfg.contract){
+    S.providers=await discoverProviders();
+    var saved=null; try{ saved=localStorage.getItem('stablerun:wallet'); }catch(e){}
+    var d=S.providers.filter(function(p){return p.info.uuid===saved;})[0]||(S.providers.length===1?S.providers[0]:null);
+    if(d){ try{ if(await useProvider(d,false)) await afterConnect(); }catch(e){} }
+  }
+  S.booted=true; S.loaded=true; S.sig=''; render();
+}
+boot();
+
 })();
 </script>
-
-</body></html>
+</body>
+</html>
