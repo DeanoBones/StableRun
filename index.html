@@ -40,6 +40,7 @@ button{font:inherit;color:inherit}
 .net{font:500 11px var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-left:4px;align-self:flex-end;padding-bottom:3px}
 .wallet{display:inline-flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:8px 12px;cursor:pointer;font:500 13px var(--f-mono)}
 .wallet:hover{border-color:var(--ink)}
+.wallet.switch-wallet{background:var(--gold);color:var(--ink);border-color:var(--gold);font-weight:800}
 .wallet .bal{color:var(--gold-text)}
 
 /* step rail */
@@ -473,9 +474,18 @@ async function useProvider(detail,prompt){
   if(!accts||!accts.length){ S.provider=null; return false; }
   S.account=String(accts[0]).toLowerCase();
   try{ localStorage.setItem('stablerun:wallet',detail.info.uuid); }catch(e){}
-  if(S.provider.on){
-    S.provider.on('accountsChanged',function(){ location.reload(); });
-    S.provider.on('chainChanged',function(){ location.reload(); });
+  if(S.provider.on&&!S.provider.__stableRunBound){
+    S.provider.__stableRunBound=true;
+    S.provider.on('accountsChanged',function(accounts){
+      S.account=accounts&&accounts.length?String(accounts[0]).toLowerCase():null;
+      S.ready=false; S.notice=null; S.sig='';
+      if(S.account){ run(async function(){ await afterConnect(); }); }
+      else { S.balance=0n; S.claimable=0n; S.recent=null; S.sig=''; render(); }
+    });
+    S.provider.on('chainChanged',function(chainHex){
+      S.chainId=parseInt(chainHex,16); S.ready=false; S.notice=null; S.sig='';
+      if(S.account) run(async function(){ await afterConnect(); }); else render();
+    });
   }
   return true;
 }
@@ -818,13 +828,17 @@ function stepIndex(){
 function renderFrame(){
   var w=$('#wallet'), claim=$('#claimChip'), notice=$('#notice'), rail=$('#rail'), foot=$('#foot'), nl=$('#netLabel');
   nl.textContent=net().name;
-  if(S.account){
-    w.hidden=false; w.innerHTML='<span>'+short(S.account)+'</span><span class="bal">'+usd(S.balance)+' USDC</span>';
+  if(S.account&&S.chainId&&S.chainId!==Number(S.cfg.chainId)){
+    w.hidden=false; w.textContent='Switch to '+net().name; w.title='Your wallet is connected, but on the wrong network';
+    w.classList.add('switch-wallet');
+  } else if(S.account){
+    w.hidden=false; w.classList.remove('switch-wallet');
+    w.innerHTML='<span>'+short(S.account)+'</span><span class="bal">'+usd(S.balance)+' USDC</span>';
     w.title=S.providerName?'Connected with '+S.providerName:'';
-  } else { w.hidden=false; w.textContent='Connect Wallet'; w.title='Connect a wallet to use StableRun'; }
+  } else { w.hidden=false; w.classList.remove('switch-wallet'); w.textContent='Connect Wallet'; w.title='Connect a wallet to use StableRun'; }
   if(S.ready&&S.claimable>0n){ claim.hidden=false; claim.disabled=!!S.busy; claim.textContent='Claim '+usd(S.claimable)+' USDC'; } else claim.hidden=true;
   var n=S.notice, html='';
-  if(n&&n.kind==='switch') html='<div class="warn"><span>Your wallet is on a different network. This race runs on '+esc(net().name)+'.</span><button type="button" class="btn sm" data-act="switch">Switch to '+esc(net().name)+'</button></div>';
+  if(n&&n.kind==='switch') html='';
   if(n&&n.kind==='nocontract') html='<div class="warn bad"><span>No StableRun contract found at that address on '+esc(net().name)+'. Check the address and network in settings.</span><a class="btn sm alt" href="#/setup">Settings</a></div>';
   if(n&&n.kind==='badtoken') html='<div class="warn bad"><span>This contract does not use Circle\'s USDC on Base. Do not join races on it unless you deployed it yourself.</span></div>';
   notice.innerHTML=html;
@@ -871,7 +885,8 @@ function currentView(){
   if(S.route.name==='setup'||!S.cfg.contract) return {html:setupHtml(),init:null};
   if(!S.booted) return {html:'<p class="sub">Loading…</p>'};
   if(!S.account) return {html:lobbyHtml(),init:function(){ heroInit(); updateCreateForm(); }};
-  if(!S.ready) return {html:'<section class="panel"><h2>One step left</h2><p class="sub">'+(S.notice&&S.notice.kind==='switch'?'Switch your wallet to '+esc(net().name)+' to continue.':'Check the settings, then reload.')+'</p></section>'};
+  if(!S.ready&&S.notice&&S.notice.kind==='switch') return {html:lobbyHtml(),init:function(){ heroInit(); updateCreateForm(); }};
+  if(!S.ready) return {html:'<section class="panel"><h2>Loading your stable</h2><p class="sub">Checking your wallet and the StableRun contract…</p></section>'};
   if(S.route.name==='lobby') return {html:lobbyHtml(),init:function(){ heroInit(); updateCreateForm(); }};
   var g=S.game;
   if(!g) return {html:'<section class="panel"><h2>Race #'+S.route.id+'</h2><p class="sub">'+(S.loaded?'There is no race with that number on this contract.':'Loading the race…')+'</p><div class="actions"><a class="btn alt" href="#/">Back to the lobby</a></div></section>'};
@@ -1146,7 +1161,7 @@ async function doCancel(){
 }
 var ACT={
   'connect':function(el){ var picker=document.getElementById('walletPicker'); if(picker) picker.remove(); run(async function(){ var d=S.providers[+el.dataset.i]; if(await useProvider(d,true)) await afterConnect(); S.sig=''; render(); }); },
-  'switch':function(){ switchChain(); },
+  'switch':function(){ run(async function(){ await switchChain(); if(S.provider&&S.account){ try{ S.chainId=parseInt(await rpc('eth_chainId',[]),16); await afterConnect(); }catch(e){ S.notice={kind:'switch'}; S.ready=false; render(); } } }); },
   'saveSetup':function(){
     var a=($('#setupContract').value||'').trim(), m=$('#setupMsg');
     if(!/^0x[0-9a-fA-F]{40}$/.test(a)){ m.textContent='That does not look like a contract address.'; m.className='msg bad'; return; }
@@ -1186,6 +1201,10 @@ document.addEventListener('click',function(e){
 });
 $('#claimChip').addEventListener('click',function(){ run(doClaim); });
 $('#wallet').addEventListener('click',async function(){
+  if(S.account&&S.chainId&&S.chainId!==Number(S.cfg.chainId)){
+    run(async function(){ await switchChain(); if(S.provider){ S.chainId=parseInt(await rpc('eth_chainId',[]),16); await afterConnect(); } });
+    return;
+  }
   if(S.account){ toast('Connected with '+(S.providerName||'your wallet')+'. Switch accounts in your wallet.'); return; }
   if(!S.providers.length) S.providers=await discoverProviders();
   showWalletPicker();
