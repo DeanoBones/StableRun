@@ -506,17 +506,25 @@ async function send(to,data,label){
 function setBusy(t){ S.busy=t; render(); }
 
 /* ---------- wallet connection ---------- */
+/* Wallets can announce themselves more than once, and many give each page load a new uuid.
+   So wallets are matched by their reverse-DNS id (or name), never by uuid. */
+function wkey(d){ var i=d&&d.info||{}; return String(i.rdns||i.name||i.uuid||'wallet').toLowerCase(); }
+function addProvider(list,d){
+  if(!d||!d.provider) return;
+  if(list.some(function(x){return x.provider===d.provider||wkey(x)===wkey(d);})) return;
+  list.push(d);
+}
 function discoverProviders(){
   return new Promise(function(res){
     var found=[];
-    function onAnn(e){ if(e&&e.detail&&e.detail.provider) found.push(e.detail); }
+    function onAnn(e){ if(e&&e.detail) addProvider(found,e.detail); }
     window.addEventListener('eip6963:announceProvider',onAnn);
     window.dispatchEvent(new Event('eip6963:requestProvider'));
     setTimeout(function(){
       window.removeEventListener('eip6963:announceProvider',onAnn);
-      if(!found.length&&window.ethereum) found.push({info:{name:'Browser wallet',uuid:'window.ethereum'},provider:window.ethereum});
+      if(!found.length&&window.ethereum) addProvider(found,{info:{name:'Browser wallet',uuid:'window.ethereum',rdns:'window.ethereum'},provider:window.ethereum});
       res(found);
-    },250);
+    },400);
   });
 }
 async function useProvider(detail,prompt){
@@ -524,7 +532,7 @@ async function useProvider(detail,prompt){
   var accts=await rpc(prompt?'eth_requestAccounts':'eth_accounts',[]);
   if(!accts||!accts.length){ S.provider=null; return false; }
   S.account=String(accts[0]).toLowerCase();
-  try{ localStorage.setItem('stablerun:wallet',detail.info.uuid); }catch(e){}
+  try{ localStorage.setItem('stablerun:wallet',wkey(detail)); }catch(e){}
   if(S.provider.on&&!S.provider.__stableRunBound){
     S.provider.__stableRunBound=true;
     S.provider.on('accountsChanged',function(accounts){
@@ -886,6 +894,10 @@ function validateName(v,players){
   return '';
 }
 var STEPS=['Lobby','Trial Paddock','Gate','Reveal','Race','Result'];
+var RN_A=['Golden','Silver','Midnight','Scarlet','Emerald','Crimson','Misty','Thunder','Velvet','Copper','Ivory','Amber','Cobalt','Sunlit','Windy','Royal','Lucky','Rolling','Stormy','Dusty','Frosty','Wild','Gallant','Hidden','Jade','Lunar','Northern','Rustic','Swift','Tawny','Verdant','Winter'];
+var RN_N=['Meadow','Derby','Cup','Plate','Stakes','Handicap','Classic','Sprint','Gallop','Hurdle','Furlong','Paddock','Stirrup','Canter','Turf','Oaks','Chase','Trophy','Dash','Mile','Rails','Bridle','Saddle','Horseshoe','Hollow','Heath','Ridge','Downs','Park','Leap','Charge','Run'];
+/* Every race gets a fixed name from its number, the same for everyone. 1024 different names before any repeat. */
+function raceName(id){ var x=(Number(id)*389+171)%1024; return RN_A[x>>5]+' '+RN_N[x&31]; }
 function stepIndex(){
   if(S.route.name!=='game'||!S.game) return 0;
   var g=S.game;
@@ -994,7 +1006,7 @@ function lobbyHtml(){
     else label='Cancelled';
     var dots=''; for(var k=0;k<r.maxPlayers;k++) dots+='<i class="d'+(k<r.playerCount?' on':'')+'"></i>';
     var st=r.status===ST.OPEN?'Open':r.status===ST.REVEALING?'Revealing':r.status===ST.FINAL?'Finished':'Cancelled';
-    return '<li class="open"><div><b class="mono">#'+r.id+'</b><small>'+usd(r.stake)+' USDC · '+st+(r.seat?' · you are in':'')+'</small></div><span class="dots" role="img" aria-label="'+r.playerCount+' of '+r.maxPlayers+' seats taken">'+dots+'</span><button type="button" class="btn '+(label==='Join'?'hot':'alt')+' sm" data-act="openGame" data-id="'+r.id+'">'+label+'</button></li>';
+    return '<li class="open"><div><b>'+raceName(r.id)+'</b><small><span class="mono">#'+r.id+'</span> · '+usd(r.stake)+' USDC · '+st+(r.seat?' · you are in':'')+'</small></div><span class="dots" role="img" aria-label="'+r.playerCount+' of '+r.maxPlayers+' seats taken">'+dots+'</span><button type="button" class="btn '+(label==='Join'?'hot':'alt')+' sm" data-act="openGame" data-id="'+r.id+'">'+label+'</button></li>';
   };
   var isOpen=function(r){ return r.status===ST.OPEN&&r.playerCount<r.maxPlayers&&r.joinDeadline>now; };
   var openL=S.recent?S.recent.filter(isOpen):[], prevL=S.recent?S.recent.filter(function(r){return !isOpen(r);}).slice(0,8):[];
@@ -1076,12 +1088,12 @@ function seatsHtml(g,mode){
   return h;
 }
 function factsHtml(g){
-  return '<dl class="facts" style="margin-top:12px"><dt>Race</dt><dd>#'+g.id+'</dd><dt>Distance</dt><dd>6 furlongs</dd><dt>Stake</dt><dd>'+usd(g.stake)+' USDC</dd><dt>Pool</dt><dd>'+usd(g.stake*BigInt(g.maxPlayers))+' USDC</dd><dt>Host</dt><dd>'+short(g.host)+'</dd></dl>';
+  return '<dl class="facts" style="margin-top:12px"><dt>Race</dt><dd>'+raceName(g.id)+' <span class="mono">#'+g.id+'</span></dd><dt>Distance</dt><dd>6 furlongs</dd><dt>Stake</dt><dd>'+usd(g.stake)+' USDC</dd><dt>Pool</dt><dd>'+usd(g.stake*BigInt(g.maxPlayers))+' USDC</dd><dt>Host</dt><dd>'+short(g.host)+'</dd></dl>';
 }
 
 /* ----- join (stable) ----- */
 function joinHtml(g){
-  return '<div class="grid-main"><section class="panel paddock-panel"><h2>Trial Paddock</h2><p class="sub">Choose your horse for race #'+g.id+'. Type a name to preview its coat and jockey silks before entering. Your boost stays hidden until the race ends.</p>'+ 
+  return '<div class="grid-main"><section class="panel paddock-panel"><h2>Trial Paddock</h2><p class="sub">Choose your horse for the '+raceName(g.id)+' (race #'+g.id+'). Type a name to preview its coat and jockey silks before entering. Your boost stays hidden until the race ends.</p>'+ 
     '<label class="lab" for="horseName">Horse name</label><div class="row"><input type="text" id="horseName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Try a name"><button type="button" class="btn alt" data-act="rand">Random</button></div>'+
     '<p class="msg" id="nameMsg"></p>'+
     '<div class="preview"><canvas id="prevCv" aria-label="Preview of your horse in its silks"></canvas><div class="boostbox"><span class="lab">Name boost</span><div class="big mono">?</div><p class="note" style="margin:10px 0 0">Sealed until the race ends. Every name is a gamble.</p></div></div>'+
@@ -1126,7 +1138,7 @@ function gateHtml(g){
   var isHost=g.host.toLowerCase()===S.account;
   var canCancel=isHost||chainNow()>g.joinDeadline;
   return '<div class="grid-main"><section class="panel"><h2>The stalls</h2><p class="sub">'+g.playerCount+' of '+g.maxPlayers+' horses in. The reveal starts when the last stall fills. Closes in <span id="joinLeft" class="mono"></span>.</p><ul class="seats">'+seatsHtml(g)+'</ul></section>'+
-    '<aside class="panel"><h2>Invite friends</h2><div class="codebox"><b>#'+g.id+'</b><button type="button" class="btn alt sm" data-act="copylink">Copy link</button></div>'+
+    '<aside class="panel"><h2>Invite friends</h2><div class="codebox"><b>'+raceName(g.id)+' · #'+g.id+'</b><button type="button" class="btn alt sm" data-act="copylink">Copy link</button></div>'+
     '<dl class="facts"><dt>Pool</dt><dd>'+usd(g.stake*BigInt(g.playerCount))+' of '+usd(g.stake*BigInt(g.maxPlayers))+' USDC</dd><dt>Stake</dt><dd>'+usd(g.stake)+' USDC</dd><dt>Field</dt><dd>'+g.maxPlayers+' horses</dd></dl>'+
     '<p class="note">Your secret is saved in this browser. Stay on this device until the reveal, or save a backup below.</p>'+
     '<div class="actions" style="margin-top:12px"><button type="button" class="btn alt sm" data-act="copysecret">Copy secret backup</button>'+(canCancel?'<button type="button" class="btn alt sm" data-act="cancel"'+(S.busy?' disabled':'')+'>Cancel race and refund</button>':'')+'</div>'+
@@ -1181,14 +1193,14 @@ function resultHtml(g){
     '<div class="actions">'+(S.claimable>0n?'<button type="button" class="btn hot" data-act="claim"'+(S.busy?' disabled':'')+'>'+(S.busy||'Claim '+usd(S.claimable)+' USDC')+'</button>':'')+(g.revealedCount>=2?'<button type="button" class="btn alt" data-act="watch">Watch the race</button>':'')+'<a class="btn alt" href="#/">Back to the lobby</a></div>';
 }
 function shareText(g,ranked){
-  var l=['StableRun · #'+g.id+' · '+g.playerCount+' horses · '+usd(g.stake*BigInt(g.playerCount))+' USDC pool',''];
+  var l=['StableRun · '+raceName(g.id)+' (#'+g.id+') · '+g.playerCount+' horses · '+usd(g.stake*BigInt(g.playerCount))+' USDC pool',''];
   ranked.forEach(function(x,k){ var p=x.p; l.push(ord(k+1)+'  '+p.name+'  '+(g.revealedCount>1?(p.score/100).toFixed(2)+'  ('+(p.roll/100).toFixed(2)+' + '+(p.boost/100).toFixed(2)+')  ':'')+short(p.wallet)); });
   g.players.forEach(function(p){ if(!p.revealed) l.push('DNR  '+p.name+'  (forfeited)  '+short(p.wallet)); });
   l.push('','Seed '+g.seed.slice(0,18)+'…');
   return l.join('\n');
 }
 function cancelledHtml(g){
-  return '<section class="panel" style="max-width:640px"><h2>Race #'+g.id+' was cancelled</h2><p class="sub">'+(g.playerCount?'Every stake was refunded.':'Nobody had joined.')+(S.claimable>0n?' Claim your USDC below.':'')+'</p><div class="actions">'+(S.claimable>0n?'<button type="button" class="btn hot" data-act="claim"'+(S.busy?' disabled':'')+'>'+(S.busy||'Claim '+usd(S.claimable)+' USDC')+'</button>':'')+'<a class="btn alt" href="#/">Back to the lobby</a></div></section>';
+  return '<section class="panel" style="max-width:640px"><h2>'+raceName(g.id)+' (#'+g.id+') was cancelled</h2><p class="sub">'+(g.playerCount?'Every stake was refunded.':'Nobody had joined.')+(S.claimable>0n?' Claim your USDC below.':'')+'</p><div class="actions">'+(S.claimable>0n?'<button type="button" class="btn hot" data-act="claim"'+(S.busy?' disabled':'')+'>'+(S.busy||'Claim '+usd(S.claimable)+' USDC')+'</button>':'')+'<a class="btn alt" href="#/">Back to the lobby</a></div></section>';
 }
 
 /* ----- clock-driven bits ----- */
@@ -1222,7 +1234,7 @@ async function doCreate(){
   var id=BigInt(await ethCall(S.cfg.contract,SEL.nextGameId)), secret=randomSecret(), commit=await commitFor(id,secret);
   saveSecret(String(id),secret);
   await send(S.cfg.contract,SEL.createAndJoin+W(id)+W(c.stakeU)+W(S.draft.n)+W(160)+commit+encStr(c.name),'Creating your race');
-  toast('Race #'+id+' is open. Share the link with friends.');
+  toast(raceName(id)+' is open. Share the link with friends.');
   S.draft.name='';
   location.hash='#/game/'+id;
 }
@@ -1305,7 +1317,7 @@ $('#wallet').addEventListener('click',async function(){
     return;
   }
   if(S.account){ toast('Connected with '+(S.providerName||'your wallet')+'. Switch accounts in your wallet.'); return; }
-  if(!S.providers.length) S.providers=await discoverProviders();
+  var fresh=await discoverProviders(); fresh.forEach(function(d){ addProvider(S.providers,d); });
   showWalletPicker();
 });
 function showWalletPicker(){
@@ -1356,7 +1368,7 @@ async function boot(){
   if(S.cfg.contract){
     S.providers=await discoverProviders();
     var saved=null; try{ saved=localStorage.getItem('stablerun:wallet'); }catch(e){}
-    var d=S.providers.filter(function(p){return p.info.uuid===saved;})[0]||(S.providers.length===1?S.providers[0]:null);
+    var d=S.providers.filter(function(p){return wkey(p)===saved;})[0]||(S.providers.length===1?S.providers[0]:null);
     if(d){ try{ if(await useProvider(d,false)) await afterConnect(); }catch(e){} }
   }
   S.booted=true; S.loaded=true; S.sig=''; render();
