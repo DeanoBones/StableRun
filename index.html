@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <title>StableRun</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Hanken+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: one racecard column. The loud moments are the hero banner and the race stage; every other panel stays quiet and print-like. */
 :root{
+  color-scheme:light;
   --bg:#EAF0EA; --surface:#F6F9F5; --ink:#0E2A1C; --muted:#4C6556; --line:#C7D5C9;
   --turf:#3E8E58; --turf2:#47A062; --rail:#FFFFFF;
   --accent:#D13A26; --accent-ink:#FFFFFF;
@@ -18,22 +19,8 @@
   --f-body:"Hanken Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
 }
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --bg:#0A1510; --surface:#11231A; --ink:#E6F0E8; --muted:#9BB4A3; --line:#25402F;
-    --turf:#1E5A38; --turf2:#256843; --rail:#D5E2D8;
-    --accent:#FF7A5E; --accent-ink:#1A0D08;
-    --gold:#F2C230; --gold-text:#F2C230; --roll:#4DAA6D;
-    color-scheme:dark;
-  }
-}
-:root[data-theme="dark"]{
-  --bg:#0A1510; --surface:#11231A; --ink:#E6F0E8; --muted:#9BB4A3; --line:#25402F;
-  --turf:#1E5A38; --turf2:#256843; --rail:#D5E2D8;
-  --accent:#FF7A5E; --accent-ink:#1A0D08;
-  --gold:#F2C230; --gold-text:#F2C230; --roll:#4DAA6D;
-  color-scheme:dark;
-}
+
+
 *,*::before,*::after{box-sizing:border-box}
 body{
   background:var(--bg); color:var(--ink); font:15px/1.5 var(--f-body);
@@ -53,6 +40,7 @@ button{font:inherit;color:inherit}
 .net{font:500 11px var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-left:4px;align-self:flex-end;padding-bottom:3px}
 .wallet{display:inline-flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:8px 12px;cursor:pointer;font:500 13px var(--f-mono)}
 .wallet:hover{border-color:var(--ink)}
+.wallet.switch-wallet{background:var(--gold);color:var(--ink);border-color:var(--gold);font-weight:800}
 .wallet .bal{color:var(--gold-text)}
 
 /* step rail */
@@ -238,10 +226,17 @@ a.btn{text-decoration:none}
 .forf .nm{display:grid;overflow-wrap:anywhere}
 .forf small{font-size:12.5px}
 .foot a{color:var(--ink)}
-.wallet.off{background:var(--ink);color:var(--surface);border-color:var(--ink);padding:8px 18px}
-.wallet.off:hover{opacity:.88}
-.warn .btn{margin-left:6px}
-.stack{display:grid;gap:20px;min-width:0}
+
+/* Wallet chooser */
+.wallet-picker{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px;background:rgba(5,24,14,.62)}
+.wallet-picker[hidden]{display:none}
+.wallet-picker-card{width:min(100%,420px);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:24px;box-shadow:0 24px 80px #061b1080}
+.wallet-picker-card h2{margin:0 0 6px;font:900 30px/1.05 var(--f-display);text-transform:uppercase}
+.wallet-picker-card p{color:var(--muted);margin:0 0 18px}
+.wallet-options{display:grid;gap:9px}
+.wallet-options .btn{width:100%;justify-content:flex-start;text-align:left}
+.wallet-picker-close{margin-top:14px;width:100%}
+
 </style>
 </head>
 <body>
@@ -264,7 +259,7 @@ a.btn{text-decoration:none}
 'use strict';
 /* After deploying, paste your contract address between the quotes and set the network.
    Or leave it blank and enter both on the Settings screen of the page. */
-var DEFAULT_CONTRACT='';
+var DEFAULT_CONTRACT='0x357752F534F99D1528b3e4a7885c065B1226BD67';
 /* ====== StableRun app: no external libraries. Talks to the wallet with plain JSON-RPC. ====== */
 var SEL={createAndJoin:'0xf3434fac',join:'0x45d8d1f9',reveal:'0x4036778f',startRace:'0x24d822bf',cancel:'0x40e58ee5',claim:'0x4e71d92d',
   nextGameId:'0xb135bbb0',getGame:'0xa2f77bcc',getPlayers:'0x460e2049',commitHash:'0xaea89e23',claimable:'0x402914f5',usdc:'0x3e413bee',
@@ -394,19 +389,16 @@ function friendly(err){
 /* ---------- state ---------- */
 var S={cfg:null,provider:null,providerName:'',account:null,chainId:null,usdc:null,clock:{block:0,ts:0,at:0},route:{name:'lobby'},game:null,
   raceSeats:[],race:null,watching:false,lastStatus:null,busy:'',recent:null,claimable:0n,balance:0n,timers:[],draft:{n:4,stake:'5',name:''},
-  nameDraft:'',providers:[],ready:false,notice:null,sig:'',polling:false,preview:null};
+  nameDraft:'',providers:[],ready:false,notice:null,sig:'',approveExact:false,polling:false,preview:null,trialName:'Midnight Runner'};
 var VIEWFN={}, INIT={};
 
-/* The contract is fixed: StableRun on Base. A page can only change it by defining
-   window.__STABLERUN_CFG before this script runs, which only the test setup does. */
-var CONTRACT='0x357752F534F99D1528b3e4a7885c065B1226BD67';
-var BASE_RPCS=['https://mainnet.base.org','https://base-rpc.publicnode.com','https://1rpc.io/base'];
-if(window.__STABLERUN_CFG) window.__S=function(){return S;};
 function loadCfg(){
-  var t=window.__STABLERUN_CFG;
-  if(t&&typeof t==='object') return {contract:t.contract,chainId:t.chainId,rpcs:t.rpcs||BASE_RPCS};
-  return {contract:CONTRACT,chainId:8453,rpcs:BASE_RPCS};
+  var c={contract:'',chainId:8453};
+  try{ var raw=JSON.parse(localStorage.getItem('stablerun:cfg')||'null'); if(raw&&typeof raw==='object'){ c.contract=raw.contract||''; c.chainId=raw.chainId||8453; } }catch(e){}
+  if(!c.contract&&typeof DEFAULT_CONTRACT==='string') c.contract=DEFAULT_CONTRACT;
+  return c;
 }
+function saveCfg(){ try{ localStorage.setItem('stablerun:cfg',JSON.stringify(S.cfg)); }catch(e){} }
 function C(){ return S.cfg.contract.toLowerCase(); }
 function net(){ return NETS[S.cfg.chainId]||{name:'chain '+S.cfg.chainId,hex:'0x'+Number(S.cfg.chainId).toString(16),rpc:'',explorer:''}; }
 function secretKey(id){ return 'stablerun:secret:'+S.cfg.chainId+':'+C()+':'+id+':'+S.account; }
@@ -417,17 +409,12 @@ function randomSecret(){ var b=new Uint8Array(32); crypto.getRandomValues(b); re
 /* ---------- timers and loops ---------- */
 function later(fn,ms){ var id=setTimeout(fn,ms); S.timers.push(id); return id; }
 function clearTimers(){ S.timers.forEach(clearTimeout); S.timers=[]; }
-var rafId=0, loops=[];
-function stopLoop(){ cancelAnimationFrame(rafId); rafId=0; loops=[]; }
+var rafId=0;
+function stopLoop(){ cancelAnimationFrame(rafId); rafId=0; }
 function startLoop(fn){
-  loops.push(fn);
-  if(rafId) return;
+  stopLoop();
   var last=performance.now();
-  var f=function(ts){
-    var dt=Math.min(0.05,Math.max(0,(ts-last)/1000)); last=ts;
-    for(var i=0;i<loops.length;i++){ try{ loops[i](dt); }catch(e){ console.error(e); } }
-    rafId=requestAnimationFrame(f);
-  };
+  var f=function(ts){ var dt=Math.min(0.05,Math.max(0,(ts-last)/1000)); last=ts; fn(dt); rafId=requestAnimationFrame(f); };
   rafId=requestAnimationFrame(f);
 }
 var toastT=0;
@@ -438,51 +425,13 @@ function copyText(t,ok){
 }
 
 /* ---------- JSON-RPC through the wallet ---------- */
-function rpc(method,params){ return S.provider.request({method:method,params:params||[]}); }   // wallet only: signing and sending
-function walletOk(){ return !!S.provider&&S.chainId===Number(S.cfg.chainId); }
-function mkErr(e){ var er=new Error(e.message||'RPC error'); er.code=e.code; er.data=e.data; return er; }
-async function postRpc(url,body){
-  var ctl=new AbortController(), t=setTimeout(function(){ctl.abort();},8000);
-  try{
-    var r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body),signal:ctl.signal});
-    if(!r.ok) throw new Error('RPC '+r.status);
-    return await r.json();
-  } finally { clearTimeout(t); }
-}
-/* Read-only calls. reqs: [{method,params}] -> results in the same order. */
-function isRate(e){ var m=String(e&&e.message||''); return (e&&(e.code===-32005||e.code===429))||/rate.?limit|too many|429|exceeded/i.test(m); }
-function sleep(ms){ return new Promise(function(r){setTimeout(r,ms);}); }
-async function viaWallet(reqs){
-  var delays=[700,1600,3200];
-  for(var t=0;;t++){
-    try{ return await Promise.all(reqs.map(function(q){ return rpc(q.method,q.params); })); }
-    catch(e){ if(!isRate(e)||t>=delays.length) throw e; await sleep(delays[t]); }
-  }
-}
-/* Polling reads use the public Base nodes, so they never eat the wallet's own request allowance.
-   Calls that must see the freshest state right before signing (viaW=true) ask the wallet's node. */
-async function readBatch(reqs,viaW){
-  if(viaW&&walletOk()) return viaWallet(reqs);
-  var body=reqs.map(function(q,i){return {jsonrpc:'2.0',id:i+1,method:q.method,params:q.params||[]};}), last;
-  var urls=S.cfg.rpcs, start=S.rpcIdx||0;
-  for(var k=0;k<urls.length;k++){
-    var idx=(start+k)%urls.length;
-    try{
-      var out=await postRpc(urls[idx],body);
-      if(!Array.isArray(out)) out=[out];
-      var by={}; out.forEach(function(o){by[o.id]=o;});
-      var res=reqs.map(function(q,i){ var o=by[i+1]; if(!o) throw new Error('The network gave no answer'); if(o.error) throw mkErr(o.error); return o.result; });
-      S.rpcIdx=idx; return res;
-    }catch(e){ last=e; if(e&&e.code!==undefined&&e.code!==-32005&&e.code!==-32603) throw e; }
-  }
-  if(walletOk()){ try{ return await viaWallet(reqs); }catch(e){ last=e; } }
-  throw last||new Error('Could not reach Base');
-}
-async function rread(method,params){ return (await readBatch([{method:method,params:params}]))[0]; }
-function ethCall(to,data,from){ var p={to:to,data:data}; if(from) p.from=from; return readBatch([{method:'eth_call',params:[p,'latest']}],true).then(function(r){return r[0];}); }
+function rpc(method,params){ return S.provider.request({method:method,params:params||[]}); }
+function ethCall(to,data,from){ var p={to:to,data:data}; if(from) p.from=from; return rpc('eth_call',[p,'latest']); }
 function chainNow(){ return S.clock.ts+(Date.now()-S.clock.at)/1000; }
-function parseClock(b){ S.clock={block:parseInt(b.number,16),ts:parseInt(b.timestamp,16),at:Date.now()}; }
-async function refreshClock(){ parseClock(await rread('eth_getBlockByNumber',['latest',false])); }
+async function refreshClock(){
+  var b=await rpc('eth_getBlockByNumber',['latest',false]);
+  S.clock={block:parseInt(b.number,16),ts:parseInt(b.timestamp,16),at:Date.now()};
+}
 async function waitReceipt(hash){
   for(var i=0;i<160;i++){
     var rc=await rpc('eth_getTransactionReceipt',[hash]);
@@ -493,7 +442,7 @@ async function waitReceipt(hash){
 }
 async function send(to,data,label){
   setBusy(label+': check your wallet…');
-  try{ await ethCall(to,data,S.account); }catch(e){ if(!isRate(e)){ setBusy(''); throw new Error(friendly(e)); } }
+  try{ await ethCall(to,data,S.account); }catch(e){ setBusy(''); throw new Error(friendly(e)); }
   var hash;
   try{ hash=await rpc('eth_sendTransaction',[{from:S.account,to:to,data:data}]); }catch(e){ setBusy(''); throw new Error(friendly(e)); }
   setBusy(label+': waiting for the network…');
@@ -525,30 +474,33 @@ async function useProvider(detail,prompt){
   if(!accts||!accts.length){ S.provider=null; return false; }
   S.account=String(accts[0]).toLowerCase();
   try{ localStorage.setItem('stablerun:wallet',detail.info.uuid); }catch(e){}
-  if(S.provider.on){
-    S.provider.on('accountsChanged',function(){ location.reload(); });
-    S.provider.on('chainChanged',function(){ location.reload(); });
+  if(S.provider.on&&!S.provider.__stableRunBound){
+    S.provider.__stableRunBound=true;
+    S.provider.on('accountsChanged',function(accounts){
+      S.account=accounts&&accounts.length?String(accounts[0]).toLowerCase():null;
+      S.ready=false; S.notice=null; S.sig='';
+      if(S.account){ run(async function(){ await afterConnect(); }); }
+      else { S.balance=0n; S.claimable=0n; S.recent=null; S.sig=''; render(); }
+    });
+    S.provider.on('chainChanged',function(chainHex){
+      S.chainId=parseInt(chainHex,16); S.ready=false; S.notice=null; S.sig='';
+      if(S.account) run(async function(){ await afterConnect(); }); else render();
+    });
   }
   return true;
 }
 async function afterConnect(){
   S.chainId=parseInt(await rpc('eth_chainId',[]),16);
-  S.wrongChain=S.chainId!==Number(S.cfg.chainId);
+  if(S.chainId!==Number(S.cfg.chainId)){ S.ready=false; S.notice={kind:'switch'}; render(); return; }
+  var code=await rpc('eth_getCode',[S.cfg.contract,'latest']);
+  if(!code||code==='0x'){ S.ready=false; S.notice={kind:'nocontract'}; render(); return; }
+  try{ S.usdc=wAddr(words(await ethCall(S.cfg.contract,SEL.usdc))[0]).toLowerCase(); }catch(e){ S.ready=false; S.notice={kind:'nocontract'}; render(); return; }
+  S.notice=null;
+  if(Number(S.cfg.chainId)===8453&&S.usdc!==CIRCLE_BASE_USDC) S.notice={kind:'badtoken'};
+  S.ready=true;
   await refreshAll();
-}
-async function initRead(){
-  try{
-    var code=await rread('eth_getCode',[S.cfg.contract,'latest']);
-    if(!code||code==='0x'){ S.notice={kind:'nocontract'}; return false; }
-    S.usdc=wAddr(words(await ethCall(S.cfg.contract,SEL.usdc))[0]).toLowerCase();
-    if(Number(S.cfg.chainId)===8453&&S.usdc!==CIRCLE_BASE_USDC) S.notice={kind:'badtoken'};
-    S.ready=true; return true;
-  }catch(e){ S.notice={kind:(e&&e.code!==undefined)?'nocontract':'offline'}; return false; }
-}
-async function refreshBalances(){
-  if(!S.account) return;
-  var r=await readBatch([{method:'eth_call',params:[{to:S.cfg.contract,data:SEL.claimable+addrW(S.account)},'latest']},{method:'eth_call',params:[{to:S.usdc,data:SEL.balanceOf+addrW(S.account)},'latest']}]);
-  S.claimable=BigInt(r[0]); S.balance=BigInt(r[1]);
+  startPolling();
+  render();
 }
 async function switchChain(){
   var n=net();
@@ -562,57 +514,49 @@ async function switchChain(){
 }
 
 /* ---------- chain reads ---------- */
-function buildGame(id,gh,ph){
+async function loadGame(id){
+  var gh=await ethCall(S.cfg.contract,SEL.getGame+W(id));
   var g=decodeGame(gh);
   if(!g||g.status===ST.NONE) return null;
-  var players=decodePlayers(ph);
+  var players=decodePlayers(await ethCall(S.cfg.contract,SEL.getPlayers+W(id)));
   g.id=id; g.code='#'+id; g.players=players;
-  g.me=S.account?players.findIndex(function(p){return p.wallet===S.account;}):-1;
-  g.hasSecret=S.account?!!loadSecret(id):false;
+  g.me=players.findIndex(function(p){return p.wallet===S.account;});
+  g.hasSecret=!!loadSecret(id);
   return g;
 }
-async function loadRecent(nextHex){
-  var next=Number(BigInt(nextHex)), ids=[];
-  for(var i=next-1;i>=1&&ids.length<20;i--) ids.push(i);
-  var reqs=[];
-  ids.forEach(function(id){
-    reqs.push({method:'eth_call',params:[{to:S.cfg.contract,data:SEL.getGame+W(id)},'latest']});
-    if(S.account) reqs.push({method:'eth_call',params:[{to:S.cfg.contract,data:SEL.seatOf+W(id)+addrW(S.account)},'latest']});
-  });
-  var res=reqs.length?await readBatch(reqs):[], step=S.account?2:1;
-  S.recent=ids.map(function(id,k){
-    var g=decodeGame(res[k*step]); g.id=id; g.seat=S.account?Number(BigInt(res[k*step+1])):0; return g;
-  });
-  S.lastLobby=Date.now();
+async function refreshBalances(){
+  S.claimable=BigInt(await ethCall(S.cfg.contract,SEL.claimable+addrW(S.account)));
+  S.balance=BigInt(await ethCall(S.usdc,SEL.balanceOf+addrW(S.account)));
+}
+async function loadRecent(){
+  var next=Number(BigInt(await ethCall(S.cfg.contract,SEL.nextGameId)));
+  var ids=[]; for(var i=next-1;i>=1&&ids.length<12;i--) ids.push(i);
+  var list=await Promise.all(ids.map(async function(id){
+    var g=decodeGame(await ethCall(S.cfg.contract,SEL.getGame+W(id)));
+    var seat=Number(BigInt(await ethCall(S.cfg.contract,SEL.seatOf+W(id)+addrW(S.account))));
+    g.id=id; g.seat=seat; return g;
+  }));
+  S.recent=list;
 }
 async function refreshAll(){
-  var reqs=[{method:'eth_getBlockByNumber',params:['latest',false]}], ix={}, C_=S.cfg.contract;
-  var add=function(to,data){ return reqs.push({method:'eth_call',params:[{to:to,data:data},'latest']})-1; };
-  if(S.account){ ix.claim=add(C_,SEL.claimable+addrW(S.account)); ix.bal=add(S.usdc,SEL.balanceOf+addrW(S.account)); }
-  var isGame=S.route.name==='game';
-  if(isGame){ ix.game=add(C_,SEL.getGame+W(S.route.id)); ix.pl=add(C_,SEL.getPlayers+W(S.route.id)); }
-  else ix.next=add(C_,SEL.nextGameId);
-  var res=await readBatch(reqs);
-  parseClock(res[0]);
-  if(ix.claim!==undefined){ S.claimable=BigInt(res[ix.claim]); S.balance=BigInt(res[ix.bal]); }
-  if(isGame){
+  await refreshClock();
+  await refreshBalances();
+  if(S.route.name==='game'){
     var prev=S.game&&S.game.id===S.route.id?S.game.status:null;
-    var g=buildGame(S.route.id,res[ix.game],res[ix.pl]);
+    var g=await loadGame(S.route.id);
     if(g&&prev===ST.REVEALING&&g.status===ST.FINAL&&g.revealedCount>=2) S.watching=true;
     S.game=g;
     if(g&&g.status===ST.FINAL&&g.revealedCount>=2) buildRace(g);
   } else {
-    S.game=null;
-    if(!S.recent||Date.now()-(S.lastLobby||0)>7000||S.forceLobby){ S.forceLobby=false; await loadRecent(res[ix.next]); }
+    S.game=null; await loadRecent();
   }
 }
 function startPolling(){
   if(S.pollId) return;
   S.pollId=setInterval(async function(){
-    if(S.polling||document.hidden||S.busy||Date.now()<(S.backoffUntil||0)) return;
-    if(S.route.name!=='game'&&Date.now()-(S.lastPoll||0)<6000) return;
-    S.lastPoll=Date.now(); S.polling=true;
-    try{ if(!S.ready){ S.notice=null; if(await initRead()) S.sig=''; } if(S.ready) await refreshAll(); render(); }catch(e){ if(isRate(e)) S.backoffUntil=Date.now()+12000; }
+    if(S.polling||!S.ready||document.hidden||S.busy) return;
+    S.polling=true;
+    try{ await refreshAll(); render(); }catch(e){}
     S.polling=false;
   },2500);
   setInterval(tick,1000);
@@ -691,6 +635,20 @@ function paintRails(ctx,W,y0,y1,C){
   for(var x=10;x<W;x+=48){ ctx.fillRect(x,y0-12,3,12); ctx.fillRect(x,y1+5,3,10); }
 }
 
+/* Live trial paddock preview: purely visual; does not touch contract state. */
+function drawTrialPreview(ph){
+  var cv=$('#trialCv'); if(!cv) return;
+  var dpr=Math.min(2,window.devicePixelRatio||1), W=260, H=130;
+  if(cv.width!==W*dpr||cv.height!==H*dpr){cv.width=W*dpr;cv.height=H*dpr;cv.style.aspectRatio=W+' / '+H;}
+  var ctx=cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  var C=themeColors(), name=norm($('#trialName')?$('#trialName').value:S.trialName)||'Midnight Runner';
+  var addr=S.account||'0x1111111111111111111111111111111111111111', sk=silksFor(addr,name);
+  ctx.fillStyle=C.surface;ctx.fillRect(0,0,W,H);paintTurf(ctx,W,14,H-14,C,0);paintRails(ctx,W,14,H-14,C);
+  drawHorse(ctx,118,112,1.7,ph||0,RM?0.4:0.7,sk,1);
+  var label=$('#trialHorseName');if(label)label.textContent=name;
+  var note=$('#trialPreviewNote');if(note)note.textContent=S.account?'Preview uses your connected wallet and this name. Boost remains hidden until the race ends.':'Preview uses a sample wallet until you connect. Coat and silks update as you type.';
+}
+
 /* hero banner: ambient horses running laps */
 function heroInit(){
   var cv=$('#heroCv'); if(!cv) return;
@@ -714,8 +672,10 @@ function heroInit(){
       drawHorse(ctx,h.x,gy,s,h.ph,RM?0.5:1,h.sk,h.num);
     });
   }
-  draw(0.016);
-  if(!RM) startLoop(draw);
+  draw(0.016); drawTrialPreview(0);
+  var heroDraw=draw;
+  function drawBoth(dt){ heroDraw(dt); drawTrialPreview(performance.now()/180); }
+  if(!RM) startLoop(drawBoth);
 }
 
 
@@ -872,7 +832,7 @@ function validateName(v,players){
   if(players&&players.some(function(p){return p.name.toLowerCase()===v.toLowerCase();})) return 'Another horse in this race already has that name.';
   return '';
 }
-var STEPS=['Lobby','Stable','Gate','Reveal','Race','Result'];
+var STEPS=['Lobby','Trial Paddock','Gate','Reveal','Race','Result'];
 function stepIndex(){
   if(S.route.name!=='game'||!S.game) return 0;
   var g=S.game;
@@ -884,30 +844,32 @@ function stepIndex(){
 function renderFrame(){
   var w=$('#wallet'), claim=$('#claimChip'), notice=$('#notice'), rail=$('#rail'), foot=$('#foot'), nl=$('#netLabel');
   nl.textContent=net().name;
-  w.hidden=false;
-  if(S.account){
-    w.className='wallet'; w.innerHTML='<span>'+short(S.account)+'</span><span class="bal">'+usd(S.balance)+' USDC</span>';
+  if(S.account&&S.chainId&&S.chainId!==Number(S.cfg.chainId)){
+    w.hidden=false; w.textContent='Switch to '+net().name; w.title='Your wallet is connected, but on the wrong network';
+    w.classList.add('switch-wallet');
+  } else if(S.account){
+    w.hidden=false; w.classList.remove('switch-wallet');
+    w.innerHTML='<span>'+short(S.account)+'</span><span class="bal">'+usd(S.balance)+' USDC</span>';
     w.title=S.providerName?'Connected with '+S.providerName:'';
-  } else { w.className='wallet off'; w.textContent='Connect'; w.title='Connect a wallet'; }
+  } else { w.hidden=false; w.classList.remove('switch-wallet'); w.textContent='Connect Wallet'; w.title='Connect a wallet to use StableRun'; }
   if(S.ready&&S.claimable>0n){ claim.hidden=false; claim.disabled=!!S.busy; claim.textContent='Claim '+usd(S.claimable)+' USDC'; } else claim.hidden=true;
   var n=S.notice, html='';
-  if(S.chooser&&!S.account) html='<div class="warn"><span>Choose a wallet</span>'+S.providers.map(function(p,i){return '<button type="button" class="btn sm" data-act="connect" data-i="'+i+'">'+esc(p.info.name)+'</button>';}).join('')+'<button type="button" class="btn sm alt" data-act="closeChooser">Cancel</button></div>';
-  else if(S.account&&S.wrongChain) html+='<div class="warn"><span>Your wallet is on a different network. This race runs on '+esc(net().name)+'.</span><button type="button" class="btn sm" data-act="switch">Switch to '+esc(net().name)+'</button></div>';
-  if(n&&n.kind==='nocontract') html+='<div class="warn bad"><span>The StableRun contract could not be found on '+esc(net().name)+'. Try reloading the page.</span></div>';
-  if(n&&n.kind==='offline') html+='<div class="warn bad"><span>Cannot reach Base right now. Retrying…</span></div>';
-  if(n&&n.kind==='badtoken') html+='<div class="warn bad"><span>This contract does not use Circle\'s USDC on Base. Do not join races on it unless you deployed it yourself.</span></div>';
+  if(n&&n.kind==='switch') html='';
+  if(n&&n.kind==='nocontract') html='<div class="warn bad"><span>No StableRun contract found at that address on '+esc(net().name)+'. Check the address and network in settings.</span><a class="btn sm alt" href="#/setup">Settings</a></div>';
+  if(n&&n.kind==='badtoken') html='<div class="warn bad"><span>This contract does not use Circle\'s USDC on Base. Do not join races on it unless you deployed it yourself.</span></div>';
   notice.innerHTML=html;
   if(S.ready&&S.route.name==='game'){
     var i=stepIndex();
     rail.hidden=false;
     rail.innerHTML=STEPS.map(function(s,k){return '<li class="'+(k<i?'done':k===i?'now':'')+'"'+(k===i?' aria-current="step"':'')+'><span class="n">'+(k+1)+'</span>'+s+'</li>';}).join('');
   } else rail.hidden=true;
-  foot.innerHTML='Network: '+esc(net().name)+(S.cfg&&S.cfg.contract?' · Contract <span class="mono">'+short(S.cfg.contract)+'</span>':'')+'<br>Winners are decided by the contract from every player\'s secret, a name boost fixed by wallet and horse name, and the hash of a block mined after the last chance to reveal. Races use real USDC on Base. Play with people you trust, and only stake what you are happy to lose.';
+  foot.innerHTML='Network: '+esc(net().name)+(S.cfg&&S.cfg.contract?' · Contract <span class="mono">'+short(S.cfg.contract)+'</span>':'')+' · <a href="#/setup">Settings</a><br>Winners are decided by the contract from every player\'s secret, a name boost fixed by wallet and horse name, and the hash of a block mined after the last chance to reveal. Races use real USDC on Base. Play with people you trust, and only stake what you are happy to lose.';
 }
 function captureInputs(){
-  var out={}; ['createName','stakeIn','horseName','codeIn','restoreIn'].forEach(function(id){
+  var out={}; ['createName','stakeIn','horseName','trialName','codeIn','setupContract','setupNet','restoreIn'].forEach(function(id){
     var el=document.getElementById(id); if(el) out[id]={v:el.value,f:document.activeElement===el,s:el.selectionStart};
   });
+  var ae=document.getElementById('approveExact'); if(ae) out.approveExact={c:ae.checked};
   return out;
 }
 function restoreInputs(k){
@@ -918,7 +880,7 @@ function restoreInputs(k){
   });
 }
 function computeSig(){
-  var g=S.game, parts=[S.ready,S.account,S.notice&&S.notice.kind,S.route.name,S.route.id,S.busy,S.watching,S.claimable>0n,String(S.balance),S.providers.length,S.booted,S.wrongChain];
+  var g=S.game, parts=[S.ready,S.account,S.notice&&S.notice.kind,S.route.name,S.route.id,S.busy,S.watching,S.claimable>0n,String(S.balance),S.providers.length,S.booted];
   if(g) parts.push(g.id,g.status,g.me,g.playerCount,g.revealedCount,g.seedBlock,g.winner,g.hasSecret,g.players.map(function(p){return p.revealed?1:0;}).join(''));
   if(S.route.name==='lobby'&&S.recent) parts.push(S.recent.map(function(r){return r.id+':'+r.status+':'+r.playerCount+':'+r.seat;}).join(','));
   return JSON.stringify(parts);
@@ -936,9 +898,13 @@ function render(){
   tick();
 }
 function currentView(){
+  if(S.route.name==='setup'||!S.cfg.contract) return {html:setupHtml(),init:null};
   if(!S.booted) return {html:'<p class="sub">Loading…</p>'};
-  if(!S.ready) return {html:'<section class="panel"><h2>Connecting to Base</h2><p class="sub">Looking for the StableRun contract. This page will try again by itself.</p></section>'};
-  if(S.route.name==='lobby') return {html:lobbyHtml(),init:function(){ heroInit(); updateCreateForm(); startPreview(); }};
+  if(!S.account) return {html:lobbyHtml(),init:function(){ heroInit(); updateCreateForm(); }};
+  if(!S.ready&&S.notice&&S.notice.kind==='switch') return {html:lobbyHtml(),init:function(){ heroInit(); updateCreateForm(); }};
+  if(!S.ready) return {html:'<section class="panel"><h2>Loading your stable</h2><p class="sub">Checking your wallet and the StableRun contract…</p></section>'};
+  if(S.route.name==='lobby') return {html:lobbyHtml(),init:function(){ heroInit(); updateCreateForm(); }};
+  if(S.route.name==='paddock') return {html:createPaddockHtml(),init:createPaddockInit};
   var g=S.game;
   if(!g) return {html:'<section class="panel"><h2>Race #'+S.route.id+'</h2><p class="sub">'+(S.loaded?'There is no race with that number on this contract.':'Loading the race…')+'</p><div class="actions"><a class="btn alt" href="#/">Back to the lobby</a></div></section>'};
   if(g.status===ST.OPEN&&g.me<0) return {html:joinHtml(g),init:joinInit};
@@ -949,61 +915,91 @@ function currentView(){
   return {html:cancelledHtml(g)};
 }
 
+/* ----- setup and connect ----- */
+function setupHtml(){
+  var c=S.cfg;
+  return '<section class="panel" style="max-width:640px"><h2>Settings</h2><p class="sub">Paste the address of your deployed StableRun contract and choose the network it lives on.</p>'+
+    '<label class="lab" for="setupNet">Network</label><select id="setupNet"><option value="8453"'+(c.chainId===8453?' selected':'')+'>Base (real USDC)</option><option value="84532"'+(c.chainId===84532?' selected':'')+'>Base Sepolia (test)</option></select>'+
+    '<div class="field"><label class="lab" for="setupContract">Contract address</label><input type="text" id="setupContract" placeholder="0x…" autocomplete="off" spellcheck="false" value="'+esc(c.contract)+'"></div>'+
+    '<p class="msg" id="setupMsg"></p><div class="actions"><button type="button" class="btn hot" data-act="saveSetup">Save and continue</button>'+(c.contract?'<a class="btn alt" href="#/">Cancel</a>':'')+'</div>'+
+    '<p class="note">The contract holds players\' USDC while a race runs. It has no owner and no admin, so what you deploy is what everyone gets. Anyone with this page can use any contract address, so only join races on contracts you trust.</p></section>';
+}
+function connectHtml(){
+  var list=S.providers.length?S.providers.map(function(p,i){return '<button type="button" class="btn'+(i===0?' hot':' alt')+'" data-act="connect" data-i="'+i+'">Connect '+esc(p.info.name)+'</button>';}).join(''):
+    '<p class="msg bad">No wallet found in this browser. Install MetaMask, Coinbase Wallet or Rabby, or open this page inside your wallet\'s built-in browser.</p>';
+  return '<section class="hero"><h1>Name a horse.<br><em>Win the pool.</em></h1><p class="lede">Friends enter a race with USDC, each backing a horse they name themselves. The contract picks the winner and pays out. Connect a wallet to see open races or start your own.</p><div class="actions">'+list+'</div><div class="banner"><canvas id="heroCv" aria-label="Horses running laps on a turf track"></canvas></div></section>';
+}
+
 /* ----- lobby ----- */
 function lobbyHtml(){
   var d=S.draft;
-  var now=chainNow();
-  var row=function(r){
-    var label='View';
-    if(r.status===ST.OPEN) label=r.seat?'Open':'Join';
-    else if(r.status===ST.REVEALING) label=r.seat?'Reveal':'View';
-    else if(r.status===ST.FINAL) label='Result';
-    else label='Cancelled';
-    var dots=''; for(var k=0;k<r.maxPlayers;k++) dots+='<i class="d'+(k<r.playerCount?' on':'')+'"></i>';
-    var st=r.status===ST.OPEN?'Open':r.status===ST.REVEALING?'Revealing':r.status===ST.FINAL?'Finished':'Cancelled';
-    return '<li class="open"><div><b class="mono">#'+r.id+'</b><small>'+usd(r.stake)+' USDC · '+st+(r.seat?' · you are in':'')+'</small></div><span class="dots" role="img" aria-label="'+r.playerCount+' of '+r.maxPlayers+' seats taken">'+dots+'</span><button type="button" class="btn '+(label==='Join'?'hot':'alt')+' sm" data-act="openGame" data-id="'+r.id+'">'+label+'</button></li>';
-  };
-  var isOpen=function(r){ return r.status===ST.OPEN&&r.playerCount<r.maxPlayers&&r.joinDeadline>now; };
-  var openL=S.recent?S.recent.filter(isOpen):[], prevL=S.recent?S.recent.filter(function(r){return !isOpen(r);}).slice(0,8):[];
-  var joinList=S.recent===null?'<p class="sub">Loading races…</p>':!openL.length?'<p class="sub">No open races right now. Start one, or enter a race number below.</p>':'<ul class="list">'+openL.map(row).join('')+'</ul>';
-  var prevList=S.recent===null?'<p class="sub">Loading races…</p>':!prevL.length?'<p class="sub">Nothing here yet.</p>':'<ul class="list">'+prevL.map(row).join('')+'</ul>';
+  var recent=!S.account?'<p class="sub">Connect your wallet to load live races from Base.</p>':S.recent===null?'<p class="sub">Loading races…</p>':!S.recent.length?'<p class="sub">No races yet. Start the first one.</p>':
+    '<ul class="list">'+S.recent.map(function(r){
+      var label='Open', cls='alt';
+      if(r.status===ST.OPEN) label=r.seat? 'Open':'Join';
+      else if(r.status===ST.REVEALING) label=r.seat?'Reveal':'View';
+      else if(r.status===ST.FINAL) label='Result';
+      else label='Cancelled';
+      var dots=''; for(var k=0;k<r.maxPlayers;k++) dots+='<i class="d'+(k<r.playerCount?' on':'')+'"></i>';
+      var st=r.status===ST.OPEN?'Open':r.status===ST.REVEALING?'Revealing':r.status===ST.FINAL?'Finished':'Cancelled';
+      return '<li class="open"><div><b class="mono">#'+r.id+'</b><small>'+usd(r.stake)+' USDC · '+st+(r.seat?' · you are in':'')+'</small></div><span class="dots" role="img" aria-label="'+r.playerCount+' of '+r.maxPlayers+' seats taken">'+dots+'</span><button type="button" class="btn alt sm" data-act="openGame" data-id="'+r.id+'">'+label+'</button></li>';
+    }).join('')+'</ul>';
   return '<section class="hero"><h1>Name a horse.<br><em>Win the pool.</em></h1>'+
     '<p class="lede">Friends enter a race with USDC, each backing a horse they name themselves. Everyone\'s secret feeds the race roll, and your wallet plus the name sets a speed boost nobody sees until the race is over. The contract picks the winner and pays out.</p>'+
     '<div class="banner"><canvas id="heroCv" aria-label="Horses running laps on a turf track"></canvas></div></section>'+
-    '<div class="grid2"><section class="panel"><h2>Create a Race</h2><p class="sub">You set the field size and the stake. Everyone pays the same, and you enter with the first horse.</p>'+
+    '<div class="grid2"><section class="panel"><h2>Start a race</h2><p class="sub">You set the field size and the stake. Everyone pays the same, and you enter with the first horse.</p>'+
       '<span class="lab" id="nLab">Horses in the race</span><div class="stepper" role="group" aria-labelledby="nLab"><button type="button" data-act="n-dec" aria-label="One fewer horse">−</button><output id="nVal">'+d.n+'</output><button type="button" data-act="n-inc" aria-label="One more horse">+</button></div>'+
       '<div class="field"><label class="lab" for="stakeIn">Stake per player (USDC)</label><input type="text" id="stakeIn" inputmode="decimal" autocomplete="off" value="'+esc(d.stake)+'" placeholder="Any amount, minimum 0.01"><div class="chips" role="group" aria-label="Quick amounts" style="margin-top:10px">'+
       [1,5,10,25].map(function(v){return '<button type="button" class="chip" data-act="stake" data-v="'+v+'">'+v+'</button>';}).join('')+'</div></div>'+
-      '<div class="field"><label class="lab" for="createName">Your horse name</label><input type="text" id="createName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Try a name" value="'+esc(d.name)+'"></div>'+
-      '<div class="preview"><canvas id="prevCv" aria-label="Preview of your horse in its silks"></canvas><div class="boostbox"><span class="lab">Your horse</span><p class="note" style="margin:6px 0 0">Colours and coat come from your wallet and the name. Change the name to change the look. The speed boost stays sealed until the race ends.</p><p class="note" id="prevNote" style="margin:8px 0 0"></p></div></div>'+
       '<p class="msg" id="createMsg"></p><p class="sum" id="createSum"></p>'+
-      '<div class="actions"><button type="button" class="btn hot" data-act="create" id="createBtn">Open the stalls</button></div>'+
-      '<p class="note">First time only, your wallet also asks you to approve USDC. After that it is one signature per race.</p></section>'+
-    '<div class="stack"><section class="panel"><h2>Join a Race</h2><p class="sub">Open races waiting for horses.</p>'+joinList+
-      '<div class="codeform"><input type="text" id="codeIn" placeholder="Race number, e.g. 12" maxlength="8" autocomplete="off" inputmode="numeric" aria-label="Race number"><button type="button" class="btn alt" data-act="findGame">Open</button></div></section>'+
-    '<section class="panel"><h2>Previous Races</h2><p class="sub">Recent races, finished or under way.</p>'+prevList+'</section></div></div>'+
+      '<div class="actions"><button type="button" class="btn hot" data-act="goPaddock" id="createBtn">Open the stalls</button></div>'+
+      '<label class="check"><input type="checkbox" id="approveExact"'+(S.approveExact?' checked':'')+'> Approve only this race\'s stake instead of a one-time unlimited USDC approval</label>'+
+      '<p class="note">First time, your wallet asks you to approve USDC, then to create and enter. After that it is one signature.</p></section>'+
+    '<section class="panel"><h2>Recent races</h2><p class="sub">Open a race to join or watch it.</p>'+recent+
+      '<div class="codeform"><input type="text" id="codeIn" placeholder="Race number, e.g. 12" maxlength="8" autocomplete="off" inputmode="numeric" aria-label="Race number"><button type="button" class="btn alt" data-act="findGame">Open</button></div></section></div>'+
     '<ol class="how"><li><span class="k">ENTER</span><b>Name your horse</b><span>Pay the stake in USDC. Your wallet and the name fix its boost, hidden until the end.</span></li>'+
       '<li><span class="k">SEAL</span><b>Commit a secret</b><span>Only a hash of your secret goes on chain, so nobody can steer the roll.</span></li>'+
       '<li><span class="k">REVEAL</span><b>Show your secret</b><span>Once the stalls are full you have 15 minutes. Miss it and your stake goes to the pot.</span></li>'+
       '<li><span class="k">RACE</span><b>Press Start race</b><span>Anyone can. The result uses a block mined after the last reveal, so nobody can know it in advance.</span></li></ol>';
 }
-function createCheck(){
+function createCheck(skipName){
   var d=S.draft, stakeU=parseUsd(d.stake), name=norm(d.name), msg='', ok=true;
   if(stakeU===null){ ok=false; msg='Enter a stake of at least 0.01 USDC, with up to 6 decimals.'; }
   else if(name){ var e=validateName(name,null); if(e){ ok=false; msg=e; } }
-  else { ok=false; msg=''; }
-  if(ok&&S.account&&S.balance<stakeU){ ok=false; msg='Your wallet has '+usd(S.balance)+' USDC. You need '+usd(stakeU)+'.'; }
+  else if(!skipName) { ok=false; msg='Enter a horse name.'; }
+  if(ok&&S.balance<stakeU){ ok=false; msg='Your wallet has '+usd(S.balance)+' USDC. You need '+usd(stakeU)+'.'; }
   return {ok:ok,msg:msg,stakeU:stakeU,name:name};
 }
 function updateCreateForm(){
-  var c=createCheck(), sum=$('#createSum'); if(!sum) return;
+  var c=createCheck(true), sum=$('#createSum'); if(!sum) return;
   $('#nVal').textContent=S.draft.n;
   $('#createMsg').textContent=c.msg; $('#createMsg').className='msg'+(c.msg?' bad':'');
   sum.innerHTML=c.stakeU!==null?'Pool <b>'+usd(c.stakeU*BigInt(S.draft.n))+' USDC</b> · winner takes all · 6 furlongs':'';
-  var b=$('#createBtn'); b.disabled=!c.ok||!!S.busy; b.textContent=S.busy?S.busy:(S.account?'Open the stalls':'Connect and open the stalls');
-  S.preview=c.name&&!validateName(c.name,null)?silksFor(S.account||SAMPLE_WALLET,c.name):null;
-  var pn=$('#prevNote'); if(pn) pn.textContent=S.account?'':'Sample colours until you connect your wallet.';
+  var b=$('#createBtn'); b.disabled=!c.ok||!!S.busy; b.textContent=S.busy?S.busy:'Open the stalls';
   document.querySelectorAll('[data-act=stake]').forEach(function(x){x.setAttribute('aria-pressed',String(parseUsd(S.draft.stake)===BigInt(x.dataset.v)*1000000n));});
+}
+
+/* ----- create-race Trial Paddock ----- */
+function createPaddockHtml(){
+  var d=S.draft, stake=parseUsd(d.stake), name=norm(d.name)||'Your horse';
+  var pool=stake===null?'—':usd(stake*BigInt(d.n));
+  var seats='';
+  for(var i=0;i<d.n;i++){
+    if(i===0) seats+='<li class="seat you"><span class="no">1</span><div class="who"><b>'+esc(name)+'</b><small>'+(S.account?short(S.account):'Your stable')+'</small></div></li>';
+    else seats+='<li class="seat empty"><span class="no">'+(i+1)+'</span><div class="who"><b>Stall '+(i+1)+'</b><small>Waiting for a friend</small></div></li>';
+  }
+  return '<div class="grid-main"><section class="panel paddock-panel"><h2>Trial Paddock</h2><p class="sub">Choose your horse name and see its look before opening the race. The name and your wallet determine its appearance.</p>'+ 
+    '<label class="lab" for="trialName">Horse name</label><div class="row"><input type="text" id="trialName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Midnight Runner" value="'+esc(d.name)+'"><button type="button" class="btn alt" data-act="trialRandom">Random</button></div><p class="msg" id="paddockMsg"></p>'+ 
+    '<div class="preview"><canvas id="trialCv" aria-label="Live preview of your horse and jockey silks"></canvas><div class="boostbox"><span class="lab">Your horse</span><div class="big mono" id="trialHorseName">'+esc(name)+'</div><p class="note" id="trialPreviewNote" style="margin:10px 0 0">Your boost remains hidden until the race ends.</p></div></div>'+ 
+    '<p class="sum" id="paddockSum">Planned pool <b>'+pool+' USDC</b> · winner takes all · 6 furlongs</p><div class="actions"><button type="button" class="btn hot" data-act="create" id="confirmCreate">Open the stalls</button><button type="button" class="btn alt" data-act="backLobby">Back</button></div><label class="check"><input type="checkbox" id="approveExact"'+(S.approveExact?' checked':'')+'> Approve only this race\'s stake instead of a one-time unlimited USDC approval</label><p class="note">Opening the stalls creates the real on-chain race and enters your horse. Your wallet will ask you to approve USDC if needed.</p></section>'+ 
+    '<aside class="panel"><h2>Racecard</h2><dl class="facts" style="margin-top:12px"><dt>Race</dt><dd>New race</dd><dt>Distance</dt><dd>6 furlongs</dd><dt>Stake</dt><dd>'+(stake===null?'—':usd(stake)+' USDC')+'</dd><dt>Pool</dt><dd>'+pool+' USDC</dd><dt>Host</dt><dd>'+(S.account?short(S.account):'Connect wallet')+'</dd></dl><ul class="seats" style="margin-top:12px">'+seats+'</ul></aside></div>';
+}
+function createPaddockInit(){
+  var inp=$('#trialName');
+  if(inp){ inp.addEventListener('input',function(){ S.draft.name=inp.value; S.trialName=inp.value; var m=$('#paddockMsg'), e=inp.value?validateName(norm(inp.value),null):'Enter a horse name to continue.'; if(m){m.textContent=e;m.className='msg'+(e?' bad':'');} var b=$('#confirmCreate'); if(b)b.disabled=!!e||!!S.busy; var label=$('#trialHorseName');if(label)label.textContent=norm(inp.value)||'Your horse'; var sum=$('#paddockSum'), st=parseUsd(S.draft.stake);if(sum)sum.innerHTML='Planned pool <b>'+(st===null?'—':usd(st*BigInt(S.draft.n)))+' USDC</b> · winner takes all · 6 furlongs'; drawTrialPreview(performance.now()/180); }); }
+  if(inp){ S.trialName=S.draft.name||'Midnight Runner'; drawTrialPreview(performance.now()/180); }
+  var b=$('#confirmCreate'); if(b)b.disabled=!S.draft.name||!!validateName(norm(S.draft.name),null)||!!S.busy;
+  var cv=$('#trialCv'); if(cv){ var ph=0; startLoop(function(dt){ph+=dt*(RM?0:6);drawTrialPreview(ph);}); }
 }
 
 /* ----- seats / racecard ----- */
@@ -1027,37 +1023,32 @@ function factsHtml(g){
 
 /* ----- join (stable) ----- */
 function joinHtml(g){
-  return '<div class="grid-main"><section class="panel"><h2>Enter race #'+g.id+'</h2>'+
-    '<p class="sub">Your horse\'s boost is fixed by your wallet and its name, and nobody sees it until the race is over. Pick a name you like, then enter.</p>'+
+  return '<div class="grid-main"><section class="panel paddock-panel"><h2>Trial Paddock</h2><p class="sub">Choose your horse for race #'+g.id+'. Type a name to preview its coat and jockey silks before entering. Your boost stays hidden until the race ends.</p>'+ 
     '<label class="lab" for="horseName">Horse name</label><div class="row"><input type="text" id="horseName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Try a name"><button type="button" class="btn alt" data-act="rand">Random</button></div>'+
     '<p class="msg" id="nameMsg"></p>'+
     '<div class="preview"><canvas id="prevCv" aria-label="Preview of your horse in its silks"></canvas><div class="boostbox"><span class="lab">Name boost</span><div class="big mono">?</div><p class="note" style="margin:10px 0 0">Sealed until the race ends. Every name is a gamble.</p></div></div>'+
     '<div class="actions"><button type="button" class="btn hot" data-act="join" id="joinBtn" disabled>Enter race · '+usd(g.stake)+' USDC</button></div>'+
-    '<p class="note">First time only, your wallet also asks you to approve USDC. After that it is one signature per race.</p></section>'+
+    '<label class="check"><input type="checkbox" id="approveExact"'+(S.approveExact?' checked':'')+'> Approve only this race\'s stake instead of a one-time unlimited USDC approval</label>'+
+    '<p class="note">First time, your wallet asks you to approve USDC, then to enter. After that it is one signature.</p></section>'+
     '<aside class="panel"><h2>Racecard</h2>'+factsHtml(g)+'<ul class="seats" style="margin-top:12px">'+seatsHtml(g)+'</ul></aside></div>';
 }
 function joinCheck(){
   var g=S.game, inp=$('#horseName'); if(!inp) return {ok:false};
   var v=norm(inp.value), e=v?validateName(v,g.players):'', ok=!!v&&!e, msg=e;
-  if(ok&&S.account&&S.balance<g.stake){ ok=false; msg='Your wallet has '+usd(S.balance)+' USDC. You need '+usd(g.stake)+'.'; }
+  if(ok&&S.balance<g.stake){ ok=false; msg='Your wallet has '+usd(S.balance)+' USDC. You need '+usd(g.stake)+'.'; }
   if(ok) msg='Looks good. You will not see its boost until the race ends.';
   return {ok:ok,msg:msg,err:!!e||(v&&!ok),name:v};
 }
 function onJoinName(){
   var c=joinCheck(), m=$('#nameMsg'); if(!m) return;
   m.textContent=c.msg||''; m.className='msg'+(c.err?' bad':'');
-  S.preview=c.name&&!validateName(c.name,S.game.players)?silksFor(S.account||SAMPLE_WALLET,c.name):null;
-  var b=$('#joinBtn'); b.disabled=!c.ok||!!S.busy; b.textContent=S.busy?S.busy:(S.account?'Enter race · '+usd(S.game.stake)+' USDC':'Connect and enter · '+usd(S.game.stake)+' USDC');
+  S.preview=c.name&&c.ok?silksFor(S.account,c.name):(c.name&&!c.err?silksFor(S.account,c.name):null);
+  var b=$('#joinBtn'); b.disabled=!c.ok||!!S.busy; b.textContent=S.busy?S.busy:'Enter race · '+usd(S.game.stake)+' USDC';
 }
 function joinInit(){
   onJoinName();
   var inp=$('#horseName'); if(inp&&!S.busy) inp.focus({preventScroll:true});
-  startPreview();
-}
-var SAMPLE_WALLET='0x00000000000000000000000000000000000057ab';
-function startPreview(){
-  var cv=$('#prevCv'); if(!cv) return;
-  var dpr, dpr=Math.min(2,window.devicePixelRatio||1), Wd=260, H=130;
+  var cv=$('#prevCv'), dpr=Math.min(2,window.devicePixelRatio||1), Wd=260, H=130;
   cv.width=Wd*dpr; cv.height=H*dpr; cv.style.aspectRatio=Wd+' / '+H;
   var ctx=cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
   var Cc=themeColors(), ph=0, fr=0;
@@ -1161,32 +1152,13 @@ async function ensureFunds(needU){
   await refreshBalances();
   if(S.balance<needU) throw new Error('You need '+usd(needU)+' USDC. Your wallet has '+usd(S.balance)+'.');
   var al=BigInt(await ethCall(S.usdc,SEL.allowance+addrW(S.account)+addrW(S.cfg.contract)));
-  if(al<needU) await send(S.usdc,SEL.approve+addrW(S.cfg.contract)+W(MAXU),'Approve USDC');
+  if(al<needU) await send(S.usdc,SEL.approve+addrW(S.cfg.contract)+W(S.approveExact?needU:MAXU),'Approve USDC');
 }
 async function commitFor(id,secret){
   var out=await ethCall(S.cfg.contract,SEL.commitHash+W(id)+addrW(S.account)+secret.slice(2));
   return out.slice(2);
 }
-async function connectWith(d){
-  if(await useProvider(d,true)) await afterConnect();
-  S.chooser=false; S.sig=''; render();
-}
-async function needWallet(){
-  if(!S.account){
-    if(!S.providers.length) throw new Error('No wallet found in this browser. Install MetaMask, Coinbase Wallet or Rabby, or open this page in your wallet\'s browser.');
-    if(S.providers.length>1){ S.chooser=true; render(); throw new Error('Choose a wallet to connect.'); }
-    await connectWith(S.providers[0]);
-    if(!S.account) throw new Error('Wallet not connected.');
-  }
-  if(S.wrongChain){
-    await switchChain();
-    S.chainId=parseInt(await rpc('eth_chainId',[]),16); S.wrongChain=S.chainId!==Number(S.cfg.chainId);
-    if(S.wrongChain) throw new Error('Switch your wallet to '+net().name+' to continue.');
-    await refreshAll();
-  }
-}
 async function doCreate(){
-  await needWallet();
   var c=createCheck(); if(!c.ok) throw new Error(c.msg||'Check the form.');
   await ensureFunds(c.stakeU);
   var id=BigInt(await ethCall(S.cfg.contract,SEL.nextGameId)), secret=randomSecret(), commit=await commitFor(id,secret);
@@ -1197,7 +1169,6 @@ async function doCreate(){
   location.hash='#/game/'+id;
 }
 async function doJoin(){
-  await needWallet();
   var g=S.game, c=joinCheck(); if(!c.ok) throw new Error(c.msg||'Check the name.');
   await ensureFunds(g.stake);
   var secret=randomSecret(), commit=await commitFor(g.id,secret);
@@ -1227,13 +1198,20 @@ async function doCancel(){
   await refreshAll(); S.sig=''; render();
 }
 var ACT={
-  'connect':function(el){ run(function(){ return connectWith(S.providers[+el.dataset.i]); }); },
-  'closeChooser':function(){ S.chooser=false; render(); },
-  'switch':function(){ switchChain(); },
+  'connect':function(el){ var picker=document.getElementById('walletPicker'); if(picker) picker.remove(); run(async function(){ var d=S.providers[+el.dataset.i]; if(await useProvider(d,true)) await afterConnect(); S.sig=''; render(); }); },
+  'switch':function(){ run(async function(){ await switchChain(); if(S.provider&&S.account){ try{ S.chainId=parseInt(await rpc('eth_chainId',[]),16); await afterConnect(); }catch(e){ S.notice={kind:'switch'}; S.ready=false; render(); } } }); },
+  'saveSetup':function(){
+    var a=($('#setupContract').value||'').trim(), m=$('#setupMsg');
+    if(!/^0x[0-9a-fA-F]{40}$/.test(a)){ m.textContent='That does not look like a contract address.'; m.className='msg bad'; return; }
+    S.cfg={contract:a,chainId:+$('#setupNet').value}; saveCfg(); location.hash='#/'; location.reload();
+  },
   'n-dec':function(){ S.draft.n=Math.max(2,S.draft.n-1); updateCreateForm(); },
   'n-inc':function(){ S.draft.n=Math.min(8,S.draft.n+1); updateCreateForm(); },
   'stake':function(el){ S.draft.stake=el.dataset.v; $('#stakeIn').value=el.dataset.v; updateCreateForm(); },
-  'create':function(){ run(doCreate); },
+  'goPaddock':function(){ S.trialName=S.draft.name||'Midnight Runner'; location.hash='#/paddock'; },
+  'backLobby':function(){ location.hash='#/'; },
+  'create':function(){ var inp=$('#trialName'); if(inp) S.draft.name=norm(inp.value); run(doCreate); },
+  'trialRandom':function(){ var inp=$('#trialName'); if(inp){ inp.value=pick(HORSES); S.trialName=inp.value; S.draft.name=inp.value; drawTrialPreview(performance.now()/180); var m=$('#paddockMsg');if(m){m.textContent='';m.className='msg';}var b=$('#confirmCreate');if(b)b.disabled=!!S.busy;var label=$('#trialHorseName');if(label)label.textContent=inp.value; inp.focus({preventScroll:true}); } },
   'join':function(){ run(doJoin); },
   'rand':function(){
     var used=S.game.players.map(function(p){return p.name.toLowerCase();}), nm;
@@ -1263,20 +1241,37 @@ document.addEventListener('click',function(e){
   var f=ACT[el.dataset.act]; if(f) f(el);
 });
 $('#claimChip').addEventListener('click',function(){ run(doClaim); });
-$('#wallet').addEventListener('click',function(){
+$('#wallet').addEventListener('click',async function(){
+  if(S.account&&S.chainId&&S.chainId!==Number(S.cfg.chainId)){
+    run(async function(){ await switchChain(); if(S.provider){ S.chainId=parseInt(await rpc('eth_chainId',[]),16); await afterConnect(); } });
+    return;
+  }
   if(S.account){ toast('Connected with '+(S.providerName||'your wallet')+'. Switch accounts in your wallet.'); return; }
-  run(async function(){
-    if(!S.providers.length) throw new Error('No wallet found in this browser. Install MetaMask, Coinbase Wallet or Rabby, or open this page in your wallet\'s browser.');
-    if(S.providers.length>1){ S.chooser=!S.chooser; render(); return; }
-    await connectWith(S.providers[0]);
-  });
+  if(!S.providers.length) S.providers=await discoverProviders();
+  showWalletPicker();
 });
+function showWalletPicker(){
+  var old=document.getElementById('walletPicker'); if(old) old.remove();
+  var names=S.providers.map(function(p){return p.info&&p.info.name?p.info.name:'Browser wallet';});
+  var options=S.providers.length?S.providers.map(function(p,i){
+    var name=p.info&&p.info.name?p.info.name:'Browser wallet';
+    return '<button type="button" class="btn '+(i===0?'hot':'alt')+'" data-act="connect" data-i="'+i+'">'+esc(name)+'</button>';
+  }).join(''):'<p class="msg bad">No injected wallet was detected. Install a browser wallet or open StableRun inside its app browser. WalletConnect is not configured in this version.</p>';
+  var modal=document.createElement('div'); modal.id='walletPicker'; modal.className='wallet-picker'; modal.setAttribute('role','dialog'); modal.setAttribute('aria-modal','true'); modal.setAttribute('aria-labelledby','walletPickerTitle');
+  modal.innerHTML='<section class="wallet-picker-card"><h2 id="walletPickerTitle">Choose your wallet</h2><p>Select a wallet detected in this browser. Your wallet will ask you to approve the connection.</p><div class="wallet-options">'+options+'</div><button type="button" class="btn alt wallet-picker-close" data-wallet-close>Cancel</button></section>';
+  modal.addEventListener('click',function(e){if(e.target===modal||e.target.closest('[data-wallet-close]')) modal.remove();});
+  document.addEventListener('keydown',function escPicker(e){if(e.key==='Escape'){modal.remove();document.removeEventListener('keydown',escPicker);}});
+  document.body.appendChild(modal);
+}
 document.addEventListener('input',function(e){
   var id=e.target&&e.target.id;
   if(id==='horseName') onJoinName();
+  if(id==='trialName'){ S.trialName=e.target.value; if(S.route.name==='paddock') S.draft.name=e.target.value; drawTrialPreview(performance.now()/180); }
   if(id==='stakeIn'){ S.draft.stake=e.target.value; updateCreateForm(); }
   if(id==='createName'){ S.draft.name=e.target.value; updateCreateForm(); }
+  if(id==='approveExact') S.approveExact=e.target.checked;
 });
+document.addEventListener('change',function(e){ if(e.target&&e.target.id==='approveExact') S.approveExact=e.target.checked; });
 document.addEventListener('keydown',function(e){
   if(e.key!=='Enter') return;
   var id=e.target&&e.target.id;
@@ -1289,6 +1284,8 @@ document.addEventListener('keydown',function(e){
 function parseRoute(){
   var h=location.hash||'', m=h.match(/^#\/game\/(\d+)$/);
   if(m) return {name:'game',id:parseInt(m[1],10)};
+  if(h==='#/setup') return {name:'setup'};
+  if(h==='#/paddock') return {name:'paddock'};
   return {name:'lobby'};
 }
 async function onRoute(){
@@ -1300,15 +1297,13 @@ async function boot(){
   S.cfg=loadCfg(); S.route=parseRoute();
   window.addEventListener('hashchange',onRoute);
   render();
-  var provP=discoverProviders();
-  await initRead();
-  S.providers=await provP;
-  var saved=null; try{ saved=localStorage.getItem('stablerun:wallet'); }catch(e){}
-  var d=S.providers.filter(function(p){return p.info.uuid===saved;})[0];
-  if(d&&S.ready){ try{ if(await useProvider(d,false)) await afterConnect(); }catch(e){} }
-  if(S.ready&&!S.account){ try{ await refreshAll(); }catch(e){} }
+  if(S.cfg.contract){
+    S.providers=await discoverProviders();
+    var saved=null; try{ saved=localStorage.getItem('stablerun:wallet'); }catch(e){}
+    var d=S.providers.filter(function(p){return p.info.uuid===saved;})[0]||(S.providers.length===1?S.providers[0]:null);
+    if(d){ try{ if(await useProvider(d,false)) await afterConnect(); }catch(e){} }
+  }
   S.booted=true; S.loaded=true; S.sig=''; render();
-  startPolling();
 }
 boot();
 
