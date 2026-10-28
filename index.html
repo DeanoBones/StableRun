@@ -389,7 +389,7 @@ function friendly(err){
 /* ---------- state ---------- */
 var S={cfg:null,provider:null,providerName:'',account:null,chainId:null,usdc:null,clock:{block:0,ts:0,at:0},route:{name:'lobby'},game:null,
   raceSeats:[],race:null,watching:false,lastStatus:null,busy:'',recent:null,claimable:0n,balance:0n,timers:[],draft:{n:4,stake:'5',name:''},
-  nameDraft:'',providers:[],ready:false,notice:null,sig:'',approveExact:false,polling:false,preview:null};
+  nameDraft:'',providers:[],ready:false,notice:null,sig:'',approveExact:false,polling:false,preview:null,trialName:'Midnight Runner'};
 var VIEWFN={}, INIT={};
 
 function loadCfg(){
@@ -635,6 +635,20 @@ function paintRails(ctx,W,y0,y1,C){
   for(var x=10;x<W;x+=48){ ctx.fillRect(x,y0-12,3,12); ctx.fillRect(x,y1+5,3,10); }
 }
 
+/* Live trial paddock preview: purely visual; does not touch contract state. */
+function drawTrialPreview(ph){
+  var cv=$('#trialCv'); if(!cv) return;
+  var dpr=Math.min(2,window.devicePixelRatio||1), W=260, H=130;
+  if(cv.width!==W*dpr||cv.height!==H*dpr){cv.width=W*dpr;cv.height=H*dpr;cv.style.aspectRatio=W+' / '+H;}
+  var ctx=cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  var C=themeColors(), name=norm($('#trialName')?$('#trialName').value:S.trialName)||'Midnight Runner';
+  var addr=S.account||'0x1111111111111111111111111111111111111111', sk=silksFor(addr,name);
+  ctx.fillStyle=C.surface;ctx.fillRect(0,0,W,H);paintTurf(ctx,W,14,H-14,C,0);paintRails(ctx,W,14,H-14,C);
+  drawHorse(ctx,118,112,1.7,ph||0,RM?0.4:0.7,sk,1);
+  var label=$('#trialHorseName');if(label)label.textContent=name;
+  var note=$('#trialPreviewNote');if(note)note.textContent=S.account?'Preview uses your connected wallet and this name. Boost remains hidden until the race ends.':'Preview uses a sample wallet until you connect. Coat and silks update as you type.';
+}
+
 /* hero banner: ambient horses running laps */
 function heroInit(){
   var cv=$('#heroCv'); if(!cv) return;
@@ -658,8 +672,10 @@ function heroInit(){
       drawHorse(ctx,h.x,gy,s,h.ph,RM?0.5:1,h.sk,h.num);
     });
   }
-  draw(0.016);
-  if(!RM) startLoop(draw);
+  draw(0.016); drawTrialPreview(0);
+  var heroDraw=draw;
+  function drawBoth(dt){ heroDraw(dt); drawTrialPreview(performance.now()/180); }
+  if(!RM) startLoop(drawBoth);
 }
 
 
@@ -816,7 +832,7 @@ function validateName(v,players){
   if(players&&players.some(function(p){return p.name.toLowerCase()===v.toLowerCase();})) return 'Another horse in this race already has that name.';
   return '';
 }
-var STEPS=['Lobby','Stable','Gate','Reveal','Race','Result'];
+var STEPS=['Lobby','Trial Paddock','Gate','Reveal','Race','Result'];
 function stepIndex(){
   if(S.route.name!=='game'||!S.game) return 0;
   var g=S.game;
@@ -850,7 +866,7 @@ function renderFrame(){
   foot.innerHTML='Network: '+esc(net().name)+(S.cfg&&S.cfg.contract?' · Contract <span class="mono">'+short(S.cfg.contract)+'</span>':'')+' · <a href="#/setup">Settings</a><br>Winners are decided by the contract from every player\'s secret, a name boost fixed by wallet and horse name, and the hash of a block mined after the last chance to reveal. Races use real USDC on Base. Play with people you trust, and only stake what you are happy to lose.';
 }
 function captureInputs(){
-  var out={}; ['createName','stakeIn','horseName','codeIn','setupContract','setupNet','restoreIn'].forEach(function(id){
+  var out={}; ['createName','stakeIn','horseName','trialName','codeIn','setupContract','setupNet','restoreIn'].forEach(function(id){
     var el=document.getElementById(id); if(el) out[id]={v:el.value,f:document.activeElement===el,s:el.selectionStart};
   });
   var ae=document.getElementById('approveExact'); if(ae) out.approveExact={c:ae.checked};
@@ -888,6 +904,7 @@ function currentView(){
   if(!S.ready&&S.notice&&S.notice.kind==='switch') return {html:lobbyHtml(),init:function(){ heroInit(); updateCreateForm(); }};
   if(!S.ready) return {html:'<section class="panel"><h2>Loading your stable</h2><p class="sub">Checking your wallet and the StableRun contract…</p></section>'};
   if(S.route.name==='lobby') return {html:lobbyHtml(),init:function(){ heroInit(); updateCreateForm(); }};
+  if(S.route.name==='paddock') return {html:createPaddockHtml(),init:createPaddockInit};
   var g=S.game;
   if(!g) return {html:'<section class="panel"><h2>Race #'+S.route.id+'</h2><p class="sub">'+(S.loaded?'There is no race with that number on this contract.':'Loading the race…')+'</p><div class="actions"><a class="btn alt" href="#/">Back to the lobby</a></div></section>'};
   if(g.status===ST.OPEN&&g.me<0) return {html:joinHtml(g),init:joinInit};
@@ -930,13 +947,16 @@ function lobbyHtml(){
   return '<section class="hero"><h1>Name a horse.<br><em>Win the pool.</em></h1>'+
     '<p class="lede">Friends enter a race with USDC, each backing a horse they name themselves. Everyone\'s secret feeds the race roll, and your wallet plus the name sets a speed boost nobody sees until the race is over. The contract picks the winner and pays out.</p>'+
     '<div class="banner"><canvas id="heroCv" aria-label="Horses running laps on a turf track"></canvas></div></section>'+
+    '<section class="panel paddock-panel"><h2>Trial paddock</h2><p class="sub">Try different names and watch your horse change. Your name shapes its coat and racing silks; connect your wallet to preview the exact look for your stable.</p>'+
+    '<label class="lab" for="trialName">Try a horse name</label><div class="row"><input type="text" id="trialName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Midnight Runner" value="'+esc(S.trialName)+'"><button type="button" class="btn alt" data-act="trialRandom">Random</button></div>'+
+    '<div class="preview"><canvas id="trialCv" aria-label="Live preview of your named horse and jockey silks"></canvas><div class="boostbox"><span class="lab">Your horse</span><div class="big mono" id="trialHorseName">'+esc(S.trialName||'Midnight Runner')+'</div><p class="note" id="trialPreviewNote" style="margin:10px 0 0">Preview only. Boosts stay hidden until a race ends.</p></div></div></section>'+
     '<div class="grid2"><section class="panel"><h2>Start a race</h2><p class="sub">You set the field size and the stake. Everyone pays the same, and you enter with the first horse.</p>'+
       '<span class="lab" id="nLab">Horses in the race</span><div class="stepper" role="group" aria-labelledby="nLab"><button type="button" data-act="n-dec" aria-label="One fewer horse">−</button><output id="nVal">'+d.n+'</output><button type="button" data-act="n-inc" aria-label="One more horse">+</button></div>'+
       '<div class="field"><label class="lab" for="stakeIn">Stake per player (USDC)</label><input type="text" id="stakeIn" inputmode="decimal" autocomplete="off" value="'+esc(d.stake)+'" placeholder="Any amount, minimum 0.01"><div class="chips" role="group" aria-label="Quick amounts" style="margin-top:10px">'+
       [1,5,10,25].map(function(v){return '<button type="button" class="chip" data-act="stake" data-v="'+v+'">'+v+'</button>';}).join('')+'</div></div>'+
       '<div class="field"><label class="lab" for="createName">Your horse name</label><input type="text" id="createName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Try a name" value="'+esc(d.name)+'"></div>'+
       '<p class="msg" id="createMsg"></p><p class="sum" id="createSum"></p>'+
-      '<div class="actions"><button type="button" class="btn hot" data-act="create" id="createBtn">Open the stalls</button></div>'+
+      '<div class="actions"><button type="button" class="btn hot" data-act="goPaddock" id="createBtn">Open the stalls</button></div>'+
       '<label class="check"><input type="checkbox" id="approveExact"'+(S.approveExact?' checked':'')+'> Approve only this race\'s stake instead of a one-time unlimited USDC approval</label>'+
       '<p class="note">First time, your wallet asks you to approve USDC, then to create and enter. After that it is one signature.</p></section>'+
     '<section class="panel"><h2>Recent races</h2><p class="sub">Open a race to join or watch it.</p>'+recent+
@@ -946,21 +966,44 @@ function lobbyHtml(){
       '<li><span class="k">REVEAL</span><b>Show your secret</b><span>Once the stalls are full you have 15 minutes. Miss it and your stake goes to the pot.</span></li>'+
       '<li><span class="k">RACE</span><b>Press Start race</b><span>Anyone can. The result uses a block mined after the last reveal, so nobody can know it in advance.</span></li></ol>';
 }
-function createCheck(){
+function createCheck(skipName){
   var d=S.draft, stakeU=parseUsd(d.stake), name=norm(d.name), msg='', ok=true;
   if(stakeU===null){ ok=false; msg='Enter a stake of at least 0.01 USDC, with up to 6 decimals.'; }
   else if(name){ var e=validateName(name,null); if(e){ ok=false; msg=e; } }
-  else { ok=false; msg=''; }
+  else if(!skipName) { ok=false; msg='Enter a horse name.'; }
   if(ok&&S.balance<stakeU){ ok=false; msg='Your wallet has '+usd(S.balance)+' USDC. You need '+usd(stakeU)+'.'; }
   return {ok:ok,msg:msg,stakeU:stakeU,name:name};
 }
 function updateCreateForm(){
-  var c=createCheck(), sum=$('#createSum'); if(!sum) return;
+  var c=createCheck(true), sum=$('#createSum'); if(!sum) return;
   $('#nVal').textContent=S.draft.n;
   $('#createMsg').textContent=c.msg; $('#createMsg').className='msg'+(c.msg?' bad':'');
   sum.innerHTML=c.stakeU!==null?'Pool <b>'+usd(c.stakeU*BigInt(S.draft.n))+' USDC</b> · winner takes all · 6 furlongs':'';
   var b=$('#createBtn'); b.disabled=!c.ok||!!S.busy; b.textContent=S.busy?S.busy:'Open the stalls';
   document.querySelectorAll('[data-act=stake]').forEach(function(x){x.setAttribute('aria-pressed',String(parseUsd(S.draft.stake)===BigInt(x.dataset.v)*1000000n));});
+}
+
+/* ----- create-race Trial Paddock ----- */
+function createPaddockHtml(){
+  var d=S.draft, stake=parseUsd(d.stake), name=norm(d.name)||'Your horse';
+  var pool=stake===null?'—':usd(stake*BigInt(d.n));
+  var seats='';
+  for(var i=0;i<d.n;i++){
+    if(i===0) seats+='<li class="seat you"><span class="no">1</span><div class="who"><b>'+esc(name)+'</b><small>'+(S.account?short(S.account):'Your stable')+'</small></div></li>';
+    else seats+='<li class="seat empty"><span class="no">'+(i+1)+'</span><div class="who"><b>Stall '+(i+1)+'</b><small>Waiting for a friend</small></div></li>';
+  }
+  return '<div class="grid-main"><section class="panel paddock-panel"><h2>Trial Paddock</h2><p class="sub">Choose your horse name and see its look before opening the race. The name and your wallet determine its appearance.</p>'+ 
+    '<label class="lab" for="trialName">Horse name</label><div class="row"><input type="text" id="trialName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Midnight Runner" value="'+esc(d.name)+'"><button type="button" class="btn alt" data-act="trialRandom">Random</button></div><p class="msg" id="paddockMsg"></p>'+ 
+    '<div class="preview"><canvas id="trialCv" aria-label="Live preview of your horse and jockey silks"></canvas><div class="boostbox"><span class="lab">Your horse</span><div class="big mono" id="trialHorseName">'+esc(name)+'</div><p class="note" id="trialPreviewNote" style="margin:10px 0 0">Your boost remains hidden until the race ends.</p></div></div>'+ 
+    '<p class="sum" id="paddockSum">Planned pool <b>'+pool+' USDC</b> · winner takes all · 6 furlongs</p><div class="actions"><button type="button" class="btn hot" data-act="create" id="confirmCreate">Open the stalls</button><button type="button" class="btn alt" data-act="backLobby">Back</button></div><label class="check"><input type="checkbox" id="approveExact"'+(S.approveExact?' checked':'')+'> Approve only this race\'s stake instead of a one-time unlimited USDC approval</label><p class="note">Opening the stalls creates the real on-chain race and enters your horse. Your wallet will ask you to approve USDC if needed.</p></section>'+ 
+    '<aside class="panel"><h2>Racecard</h2><dl class="facts" style="margin-top:12px"><dt>Race</dt><dd>New race</dd><dt>Distance</dt><dd>6 furlongs</dd><dt>Stake</dt><dd>'+(stake===null?'—':usd(stake)+' USDC')+'</dd><dt>Pool</dt><dd>'+pool+' USDC</dd><dt>Host</dt><dd>'+(S.account?short(S.account):'Connect wallet')+'</dd></dl><ul class="seats" style="margin-top:12px">'+seats+'</ul></aside></div>';
+}
+function createPaddockInit(){
+  var inp=$('#trialName');
+  if(inp){ inp.addEventListener('input',function(){ S.draft.name=inp.value; S.trialName=inp.value; var m=$('#paddockMsg'), e=inp.value?validateName(norm(inp.value),null):'Enter a horse name to continue.'; if(m){m.textContent=e;m.className='msg'+(e?' bad':'');} var b=$('#confirmCreate'); if(b)b.disabled=!!e||!!S.busy; var label=$('#trialHorseName');if(label)label.textContent=norm(inp.value)||'Your horse'; var sum=$('#paddockSum'), st=parseUsd(S.draft.stake);if(sum)sum.innerHTML='Planned pool <b>'+(st===null?'—':usd(st*BigInt(S.draft.n)))+' USDC</b> · winner takes all · 6 furlongs'; drawTrialPreview(performance.now()/180); }); }
+  if(inp){ S.trialName=S.draft.name||'Midnight Runner'; drawTrialPreview(performance.now()/180); }
+  var b=$('#confirmCreate'); if(b)b.disabled=!S.draft.name||!!validateName(norm(S.draft.name),null)||!!S.busy;
+  var cv=$('#trialCv'); if(cv){ var ph=0; startLoop(function(dt){ph+=dt*(RM?0:6);drawTrialPreview(ph);}); }
 }
 
 /* ----- seats / racecard ----- */
@@ -984,8 +1027,7 @@ function factsHtml(g){
 
 /* ----- join (stable) ----- */
 function joinHtml(g){
-  return '<div class="grid-main"><section class="panel"><h2>Enter race #'+g.id+'</h2>'+
-    '<p class="sub">Your horse\'s boost is fixed by your wallet and its name, and nobody sees it until the race is over. Pick a name you like, then enter.</p>'+
+  return '<div class="grid-main"><section class="panel paddock-panel"><h2>Trial Paddock</h2><p class="sub">Choose your horse for race #'+g.id+'. Type a name to preview its coat and jockey silks before entering. Your boost stays hidden until the race ends.</p>'+ 
     '<label class="lab" for="horseName">Horse name</label><div class="row"><input type="text" id="horseName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Try a name"><button type="button" class="btn alt" data-act="rand">Random</button></div>'+
     '<p class="msg" id="nameMsg"></p>'+
     '<div class="preview"><canvas id="prevCv" aria-label="Preview of your horse in its silks"></canvas><div class="boostbox"><span class="lab">Name boost</span><div class="big mono">?</div><p class="note" style="margin:10px 0 0">Sealed until the race ends. Every name is a gamble.</p></div></div>'+
@@ -1170,7 +1212,10 @@ var ACT={
   'n-dec':function(){ S.draft.n=Math.max(2,S.draft.n-1); updateCreateForm(); },
   'n-inc':function(){ S.draft.n=Math.min(8,S.draft.n+1); updateCreateForm(); },
   'stake':function(el){ S.draft.stake=el.dataset.v; $('#stakeIn').value=el.dataset.v; updateCreateForm(); },
-  'create':function(){ run(doCreate); },
+  'goPaddock':function(){ S.trialName=S.draft.name||'Midnight Runner'; location.hash='#/paddock'; },
+  'backLobby':function(){ location.hash='#/'; },
+  'create':function(){ var inp=$('#trialName'); if(inp) S.draft.name=norm(inp.value); run(doCreate); },
+  'trialRandom':function(){ var inp=$('#trialName'); if(inp){ inp.value=pick(HORSES); S.trialName=inp.value; S.draft.name=inp.value; drawTrialPreview(performance.now()/180); var m=$('#paddockMsg');if(m){m.textContent='';m.className='msg';}var b=$('#confirmCreate');if(b)b.disabled=!!S.busy;var label=$('#trialHorseName');if(label)label.textContent=inp.value; inp.focus({preventScroll:true}); } },
   'join':function(){ run(doJoin); },
   'rand':function(){
     var used=S.game.players.map(function(p){return p.name.toLowerCase();}), nm;
@@ -1225,6 +1270,7 @@ function showWalletPicker(){
 document.addEventListener('input',function(e){
   var id=e.target&&e.target.id;
   if(id==='horseName') onJoinName();
+  if(id==='trialName'){ S.trialName=e.target.value; if(S.route.name==='paddock') S.draft.name=e.target.value; drawTrialPreview(performance.now()/180); }
   if(id==='stakeIn'){ S.draft.stake=e.target.value; updateCreateForm(); }
   if(id==='createName'){ S.draft.name=e.target.value; updateCreateForm(); }
   if(id==='approveExact') S.approveExact=e.target.checked;
@@ -1243,6 +1289,7 @@ function parseRoute(){
   var h=location.hash||'', m=h.match(/^#\/game\/(\d+)$/);
   if(m) return {name:'game',id:parseInt(m[1],10)};
   if(h==='#/setup') return {name:'setup'};
+  if(h==='#/paddock') return {name:'paddock'};
   return {name:'lobby'};
 }
 async function onRoute(){
