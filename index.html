@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <title>StableRun</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Hanken+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: one racecard column. The loud moments are the hero banner and the race stage; every other panel stays quiet and print-like. */
 :root{
+  color-scheme:light;
   --bg:#EAF0EA; --surface:#F6F9F5; --ink:#0E2A1C; --muted:#4C6556; --line:#C7D5C9;
   --turf:#3E8E58; --turf2:#47A062; --rail:#FFFFFF;
   --accent:#D13A26; --accent-ink:#FFFFFF;
@@ -18,22 +19,8 @@
   --f-body:"Hanken Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
 }
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --bg:#0A1510; --surface:#11231A; --ink:#E6F0E8; --muted:#9BB4A3; --line:#25402F;
-    --turf:#1E5A38; --turf2:#256843; --rail:#D5E2D8;
-    --accent:#FF7A5E; --accent-ink:#1A0D08;
-    --gold:#F2C230; --gold-text:#F2C230; --roll:#4DAA6D;
-    color-scheme:dark;
-  }
-}
-:root[data-theme="dark"]{
-  --bg:#0A1510; --surface:#11231A; --ink:#E6F0E8; --muted:#9BB4A3; --line:#25402F;
-  --turf:#1E5A38; --turf2:#256843; --rail:#D5E2D8;
-  --accent:#FF7A5E; --accent-ink:#1A0D08;
-  --gold:#F2C230; --gold-text:#F2C230; --roll:#4DAA6D;
-  color-scheme:dark;
-}
+
+
 *,*::before,*::after{box-sizing:border-box}
 body{
   background:var(--bg); color:var(--ink); font:15px/1.5 var(--f-body);
@@ -260,7 +247,7 @@ a.btn{text-decoration:none}
 'use strict';
 /* After deploying, paste your contract address between the quotes and set the network.
    Or leave it blank and enter both on the Settings screen of the page. */
-var DEFAULT_CONTRACT='';
+var DEFAULT_CONTRACT='0x357752F534F99D1528b3e4a7885c065B1226BD67';
 /* ====== StableRun app: no external libraries. Talks to the wallet with plain JSON-RPC. ====== */
 var SEL={createAndJoin:'0xf3434fac',join:'0x45d8d1f9',reveal:'0x4036778f',startRace:'0x24d822bf',cancel:'0x40e58ee5',claim:'0x4e71d92d',
   nextGameId:'0xb135bbb0',getGame:'0xa2f77bcc',getPlayers:'0x460e2049',commitHash:'0xaea89e23',claimable:'0x402914f5',usdc:'0x3e413bee',
@@ -823,7 +810,7 @@ function renderFrame(){
   if(S.account){
     w.hidden=false; w.innerHTML='<span>'+short(S.account)+'</span><span class="bal">'+usd(S.balance)+' USDC</span>';
     w.title=S.providerName?'Connected with '+S.providerName:'';
-  } else w.hidden=true;
+  } else { w.hidden=false; w.textContent='Connect Wallet'; w.title='Connect a wallet to use StableRun'; }
   if(S.ready&&S.claimable>0n){ claim.hidden=false; claim.disabled=!!S.busy; claim.textContent='Claim '+usd(S.claimable)+' USDC'; } else claim.hidden=true;
   var n=S.notice, html='';
   if(n&&n.kind==='switch') html='<div class="warn"><span>Your wallet is on a different network. This race runs on '+esc(net().name)+'.</span><button type="button" class="btn sm" data-act="switch">Switch to '+esc(net().name)+'</button></div>';
@@ -872,7 +859,7 @@ function render(){
 function currentView(){
   if(S.route.name==='setup'||!S.cfg.contract) return {html:setupHtml(),init:null};
   if(!S.booted) return {html:'<p class="sub">Loading…</p>'};
-  if(!S.account) return {html:connectHtml(),init:heroInit};
+  if(!S.account) return {html:lobbyHtml(),init:function(){ heroInit(); updateCreateForm(); }};
   if(!S.ready) return {html:'<section class="panel"><h2>One step left</h2><p class="sub">'+(S.notice&&S.notice.kind==='switch'?'Switch your wallet to '+esc(net().name)+' to continue.':'Check the settings, then reload.')+'</p></section>'};
   if(S.route.name==='lobby') return {html:lobbyHtml(),init:function(){ heroInit(); updateCreateForm(); }};
   var g=S.game;
@@ -903,7 +890,7 @@ function connectHtml(){
 /* ----- lobby ----- */
 function lobbyHtml(){
   var d=S.draft;
-  var recent=S.recent===null?'<p class="sub">Loading races…</p>':!S.recent.length?'<p class="sub">No races yet. Start the first one.</p>':
+  var recent=!S.account?'<p class="sub">Connect your wallet to load live races from Base.</p>':S.recent===null?'<p class="sub">Loading races…</p>':!S.recent.length?'<p class="sub">No races yet. Start the first one.</p>':
     '<ul class="list">'+S.recent.map(function(r){
       var label='Open', cls='alt';
       if(r.status===ST.OPEN) label=r.seat? 'Open':'Join';
@@ -1187,7 +1174,7 @@ document.addEventListener('click',function(e){
   var f=ACT[el.dataset.act]; if(f) f(el);
 });
 $('#claimChip').addEventListener('click',function(){ run(doClaim); });
-$('#wallet').addEventListener('click',function(){ toast(S.providerName?('Connected with '+S.providerName+'. Switch accounts in your wallet.'):'Wallet connected.'); });
+$('#wallet').addEventListener('click',async function(){ if(S.account){ toast('Connected with '+(S.providerName||'your wallet')+'. Switch accounts in your wallet.'); return; } if(!S.providers.length){ S.providers=await discoverProviders(); } if(!S.providers.length){ toast('No wallet found. Open StableRun in MetaMask, Coinbase Wallet or Rabby.'); return; } run(async function(){ var d=S.providers[0]; if(await useProvider(d,true)) await afterConnect(); S.sig=''; render(); }); });
 document.addEventListener('input',function(e){
   var id=e.target&&e.target.id;
   if(id==='horseName') onJoinName();
