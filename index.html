@@ -225,6 +225,17 @@ a.btn{text-decoration:none}
 .forf .nm{display:grid;overflow-wrap:anywhere}
 .forf small{font-size:12.5px}
 .foot a{color:var(--ink)}
+
+/* Wallet chooser */
+.wallet-picker{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px;background:rgba(5,24,14,.62)}
+.wallet-picker[hidden]{display:none}
+.wallet-picker-card{width:min(100%,420px);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:24px;box-shadow:0 24px 80px #061b1080}
+.wallet-picker-card h2{margin:0 0 6px;font:900 30px/1.05 var(--f-display);text-transform:uppercase}
+.wallet-picker-card p{color:var(--muted);margin:0 0 18px}
+.wallet-options{display:grid;gap:9px}
+.wallet-options .btn{width:100%;justify-content:flex-start;text-align:left}
+.wallet-picker-close{margin-top:14px;width:100%}
+
 </style>
 </head>
 <body>
@@ -1134,7 +1145,7 @@ async function doCancel(){
   await refreshAll(); S.sig=''; render();
 }
 var ACT={
-  'connect':function(el){ run(async function(){ var d=S.providers[+el.dataset.i]; if(await useProvider(d,true)) await afterConnect(); S.sig=''; render(); }); },
+  'connect':function(el){ var picker=document.getElementById('walletPicker'); if(picker) picker.remove(); run(async function(){ var d=S.providers[+el.dataset.i]; if(await useProvider(d,true)) await afterConnect(); S.sig=''; render(); }); },
   'switch':function(){ switchChain(); },
   'saveSetup':function(){
     var a=($('#setupContract').value||'').trim(), m=$('#setupMsg');
@@ -1174,7 +1185,24 @@ document.addEventListener('click',function(e){
   var f=ACT[el.dataset.act]; if(f) f(el);
 });
 $('#claimChip').addEventListener('click',function(){ run(doClaim); });
-$('#wallet').addEventListener('click',async function(){ if(S.account){ toast('Connected with '+(S.providerName||'your wallet')+'. Switch accounts in your wallet.'); return; } if(!S.providers.length){ S.providers=await discoverProviders(); } if(!S.providers.length){ toast('No wallet found. Open StableRun in MetaMask, Coinbase Wallet or Rabby.'); return; } run(async function(){ var d=S.providers[0]; if(await useProvider(d,true)) await afterConnect(); S.sig=''; render(); }); });
+$('#wallet').addEventListener('click',async function(){
+  if(S.account){ toast('Connected with '+(S.providerName||'your wallet')+'. Switch accounts in your wallet.'); return; }
+  if(!S.providers.length) S.providers=await discoverProviders();
+  showWalletPicker();
+});
+function showWalletPicker(){
+  var old=document.getElementById('walletPicker'); if(old) old.remove();
+  var names=S.providers.map(function(p){return p.info&&p.info.name?p.info.name:'Browser wallet';});
+  var options=S.providers.length?S.providers.map(function(p,i){
+    var name=p.info&&p.info.name?p.info.name:'Browser wallet';
+    return '<button type="button" class="btn '+(i===0?'hot':'alt')+'" data-act="connect" data-i="'+i+'">'+esc(name)+'</button>';
+  }).join(''):'<p class="msg bad">No injected wallet was detected. Install a browser wallet or open StableRun inside its app browser. WalletConnect is not configured in this version.</p>';
+  var modal=document.createElement('div'); modal.id='walletPicker'; modal.className='wallet-picker'; modal.setAttribute('role','dialog'); modal.setAttribute('aria-modal','true'); modal.setAttribute('aria-labelledby','walletPickerTitle');
+  modal.innerHTML='<section class="wallet-picker-card"><h2 id="walletPickerTitle">Choose your wallet</h2><p>Select a wallet detected in this browser. Your wallet will ask you to approve the connection.</p><div class="wallet-options">'+options+'</div><button type="button" class="btn alt wallet-picker-close" data-wallet-close>Cancel</button></section>';
+  modal.addEventListener('click',function(e){if(e.target===modal||e.target.closest('[data-wallet-close]')) modal.remove();});
+  document.addEventListener('keydown',function escPicker(e){if(e.key==='Escape'){modal.remove();document.removeEventListener('keydown',escPicker);}});
+  document.body.appendChild(modal);
+}
 document.addEventListener('input',function(e){
   var id=e.target&&e.target.id;
   if(id==='horseName') onJoinName();
