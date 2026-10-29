@@ -629,12 +629,14 @@ function startPolling(){
 /* ---------- race data from chain results ---------- */
 /* Each horse's pace is a mix of two slow waves (surges and lulls) that always end exactly at its finish time,
    so the finishing order never changes. Here we try many wave sets and keep the one with the most overtaking before the closing stretch. */
+/* Biggest swing in pace. 0.6 means a horse is never slower than 40% of its average speed. */
+var MAXSWING=0.60;
 function setWaves(rows,g,seats,a){
   rows.forEach(function(r,i){
     var h=h32(g.seed+'|'+g.players[seats[i].pi].wallet+'#'+a,21);
-    var k1=1+(h%3), sg1=(h>>>2)&1?1:-1, A1=sg1*(0.40+((h>>>3)%31)/100);
+    var k1=1+(h%3), sg1=(h>>>2)&1?1:-1, A1=sg1*(0.28+((h>>>3)%23)/100);
     var k2=2+((h>>>9)%4); if(k2===k1) k2++;
-    var room=Math.max(0,0.80-Math.abs(A1)), A2=((h>>>12)&1?1:-1)*(((h>>>13)%101)/100)*room;
+    var room=Math.max(0,MAXSWING-Math.abs(A1)), A2=((h>>>12)&1?1:-1)*(((h>>>13)%101)/100)*room;
     r.k1=k1; r.k2=k2; r.A1=A1; r.A2=A2;
   });
 }
