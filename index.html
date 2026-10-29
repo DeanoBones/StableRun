@@ -627,16 +627,47 @@ function startPolling(){
 }
 
 /* ---------- race data from chain results ---------- */
+/* Each horse's pace is a mix of two slow waves (surges and lulls) that always end exactly at its finish time,
+   so the finishing order never changes. Here we try many wave sets and keep the one with the most overtaking before the closing stretch. */
+function setWaves(rows,g,seats,a){
+  rows.forEach(function(r,i){
+    var h=h32(g.seed+'|'+g.players[seats[i].pi].wallet+'#'+a,21);
+    var k1=1+(h%3), sg1=(h>>>2)&1?1:-1, A1=sg1*(0.40+((h>>>3)%31)/100);
+    var k2=2+((h>>>9)%4); if(k2===k1) k2++;
+    var room=Math.max(0,0.80-Math.abs(A1)), A2=((h>>>12)&1?1:-1)*(((h>>>13)%101)/100)*room;
+    r.k1=k1; r.k2=k2; r.A1=A1; r.A2=A2;
+  });
+}
+function overtakes(rows){
+  var n=rows.length, tEnd=Math.min.apply(null,rows.map(function(r){return r.T;}))*0.93, N=160, flips=0, lead=0, prev=null, prevLead=-1;
+  for(var j=1;j<=N;j++){
+    var t=tEnd*j/N, P=rows.map(function(r){return progress(r,t);}), cur=[];
+    for(var a=0;a<n;a++) for(var b=a+1;b<n;b++) cur.push(P[a]>P[b]?1:0);
+    if(prev) for(var q=0;q<cur.length;q++) if(cur[q]!==prev[q]) flips++;
+    prev=cur;
+    var li=0; for(var a2=1;a2<n;a2++) if(P[a2]>P[li]) li=a2;
+    if(prevLead>=0&&li!==prevLead) lead++; prevLead=li;
+  }
+  return Math.min(flips,3*n*(n-1)/2+6)+Math.min(lead,5)*3;
+}
+function pickWaves(rows,g,seats){
+  var best=-1, bestA=0;
+  for(var a=0;a<80;a++){
+    setWaves(rows,g,seats,a);
+    var sc=overtakes(rows);
+    if(sc>best){ best=sc; bestA=a; }
+  }
+  setWaves(rows,g,seats,bestA);
+}
 function buildRace(g){
   var seats=[], rows=[];
   g.players.forEach(function(p,i){ if(p.revealed) seats.push({addr:p.wallet,owner:short(p.wallet),name:p.name,boost:p.boost/100,silks:silksFor(p.wallet,p.name),you:p.wallet===S.account,pi:i}); });
   var maxPts=Math.max.apply(null,seats.map(function(s){return g.players[s.pi].score/100;}));
   seats.forEach(function(s,i){
-    var p=g.players[s.pi], pts=p.score/100, h=h32(g.seed+'|'+p.wallet,21);
-    var r={idx:i,roll:p.roll/100,boost:p.boost/100,score:pts,T:RT0+(maxPts-pts)*0.06*RTS,k1:1+(h%4),k2:1+((h>>>3)%5),A1:((h>>>6)%111)/100-0.55,A2:((h>>>13)%71)/100-0.35};
-    if(r.k2===r.k1) r.k2=(r.k2%5)+1;
-    rows.push(r);
+    var p=g.players[s.pi], pts=p.score/100;
+    rows.push({idx:i,roll:p.roll/100,boost:p.boost/100,score:pts,T:RT0+(maxPts-pts)*0.06*RTS,k1:1,k2:2,A1:0,A2:0});
   });
+  pickWaves(rows,g,seats);
   var order=rows.slice().sort(function(a,b){return b.score-a.score||a.idx-b.idx;});
   order.forEach(function(r,i){r.rank=i+1;});
   S.raceSeats=seats; S.race={rows:rows,order:order,seed:g.seed,tx:''};
@@ -777,7 +808,7 @@ INIT.race=function(){
     fr++; if(fr%90===0) C=themeColors();
     if(wrap.clientWidth>0&&Math.floor(wrap.clientWidth)!==g.W) setup();
     var scale=1;
-    if(!RM&&close&&st.tau>0){ var lead0=0; rows.forEach(function(r){lead0=Math.max(lead0,progress(r,st.tau));}); if(lead0>0.955&&st.tau<winnerT+0.9) scale=0.5; }
+    if(!RM&&close&&st.tau>0){ var lead0=0; rows.forEach(function(r){lead0=Math.max(lead0,progress(r,st.tau));}); if(lead0>0.955&&st.nFin<2&&st.tau<winnerT+1.6) scale=0.5; }
     st.slow=scale<1;
     var prevTau=st.tau; st.tau+=dt*scale; var tau=st.tau;
     if(prevTau<0&&tau>=0) say("They're off!");
@@ -869,7 +900,7 @@ INIT.race=function(){
 
     // horses (back lane first)
     for(var i2=0;i2<n;i2++){
-      var nose=lx-(plead-P[i2])*(Ssc/LAPS)+B[i2], cx=nose-38*g.s, gy=laneGround(i2);
+      var nose=Math.max(46*g.s,lx-(plead-P[i2])*Ssc)+B[i2], cx=nose-38*g.s, gy=laneGround(i2);
       var m=Math.min(1,V[i2]*1.1);
       drawHorse(ctx,cx,gy,g.s,st.ph[i2],m,S.raceSeats[i2].silks,i2+1);
       var tail=cx-33*g.s-5;
