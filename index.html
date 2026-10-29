@@ -320,6 +320,9 @@ function hms(sec){ sec=Math.max(0,Math.floor(sec)); var h=Math.floor(sec/3600), 
 
 
 /* ---------- race motion (same maths as the prototype) ---------- */
+/* The replay is purely visual: the contract fixes the finishing order, and these only set how long it takes to show.
+   LAPS laps of the course, about RT0 seconds for the winner. RTS stretches the gaps in time so margins look the same as in the short race. */
+var LAPS=3, RT0=42, RTS=RT0/16;
 function progress(r,tau){
   var u=Math.min(1,Math.max(0,tau/r.T));
   return u+r.A1/(r.k1*Math.PI)*Math.sin(r.k1*Math.PI*u)+r.A2/(r.k2*Math.PI)*Math.sin(r.k2*Math.PI*u);
@@ -630,7 +633,7 @@ function buildRace(g){
   var maxPts=Math.max.apply(null,seats.map(function(s){return g.players[s.pi].score/100;}));
   seats.forEach(function(s,i){
     var p=g.players[s.pi], pts=p.score/100, h=h32(g.seed+'|'+p.wallet,21);
-    var r={idx:i,roll:p.roll/100,boost:p.boost/100,score:pts,T:16+(maxPts-pts)*0.06,k1:1+(h%4),k2:1+((h>>>3)%5),A1:((h>>>6)%111)/100-0.55,A2:((h>>>13)%71)/100-0.35};
+    var r={idx:i,roll:p.roll/100,boost:p.boost/100,score:pts,T:RT0+(maxPts-pts)*0.06*RTS,k1:1+(h%4),k2:1+((h>>>3)%5),A1:((h>>>6)%111)/100-0.55,A2:((h>>>13)%71)/100-0.35};
     if(r.k2===r.k1) r.k2=(r.k2%5)+1;
     rows.push(r);
   });
@@ -689,11 +692,13 @@ function drawHorse(ctx,cx,gy,s,ph,m,sk,num){
 function paintTurf(ctx,W,y0,y1,C,off){
   ctx.fillStyle=C.turf; ctx.fillRect(0,y0,W,y1-y0);
   ctx.fillStyle=C.turf2;
-  for(var x=-46+((off||0)%92),k=0;x<W;x+=46,k++){ if(k%2) ctx.fillRect(x,y0,46,y1-y0); }
+  var o=(((off||0)%92)+92)%92;
+  for(var x=-46+o,k=0;x<W;x+=46,k++){ if(k%2) ctx.fillRect(x,y0,46,y1-y0); }
 }
-function paintRails(ctx,W,y0,y1,C){
+function paintRails(ctx,W,y0,y1,C,off){
   ctx.fillStyle=C.rail; ctx.fillRect(0,y0-5,W,5); ctx.fillRect(0,y1,W,5);
-  for(var x=10;x<W;x+=48){ ctx.fillRect(x,y0-12,3,12); ctx.fillRect(x,y1+5,3,10); }
+  var o=(((off||0)%48)+48)%48;
+  for(var x=-38+o;x<W;x+=48){ ctx.fillRect(x,y0-12,3,12); ctx.fillRect(x,y1+5,3,10); }
 }
 
 /* Live trial paddock preview: purely visual; does not touch contract state. */
@@ -747,7 +752,7 @@ VIEWFN.race=function(){
     var s=S.raceSeats[i];
     rows+='<div class="brow" id="br'+i+'" style="transform:translateY('+(i*44)+'px)"><span class="pos mono">–</span><span class="no" style="background:'+s.silks.c1+'">'+(i+1)+'</span><span class="nm">'+esc(s.name)+'</span><span class="bst"></span><span class="gap mono"></span></div>';
   }
-  return '<div class="stagehead"><h2>'+G.code+' · 6 furlongs</h2><span class="mono">Going: good to firm · '+pool()+' USDC to the winner</span></div>'+
+  return '<div class="stagehead"><h2>'+raceName(G.id)+' · '+LAPS+' laps</h2><span class="mono">Going: good to firm · '+pool()+' USDC to the winner</span></div>'+
     '<div class="stagewrap"><canvas id="track" aria-label="Animated horse race"></canvas><div class="tote" id="tote" aria-live="polite"><span class="l0">Horses are loading into the stalls.</span></div></div>'+
     '<div class="board" id="board" style="height:'+(n*44)+'px">'+rows+'</div>'+
     '<div class="after"><button type="button" class="btn hot" data-act="result" id="afterBtn" hidden>See the result</button><button type="button" class="linkbtn" data-act="skip">Skip to result</button></div>';
@@ -762,7 +767,7 @@ INIT.race=function(){
   function setup(){ var W=Math.max(300,Math.floor(wrap.clientWidth)); g=geo(W,n); cv.width=Math.round(W*dpr); cv.height=Math.round(g.H*dpr); cv.style.height=g.H+'px'; ctx.setTransform(dpr,0,0,dpr,0,0); }
   setup();
   var C=themeColors(), fr=0, tote=$('#tote'), lastBoard=0;
-  var winnerT=R.order[0].T, close=n>1&&(R.order[1].T-R.order[0].T)<0.35;
+  var winnerT=R.order[0].T, close=n>1&&(R.order[1].T-R.order[0].T)<0.35*RTS;
   var st={tau:-3,msgs:[],lastMsg:-9,prevRank:null,prevIdx:null,fin:rows.map(function(){return false;}),nFin:0,ph:rows.map(function(){return 0;}),dust:[],conf:[],flash:0,half:false,last:false,slow:false};
   var nm=function(i){return S.raceSeats[i].name;};
   function say(t){ st.msgs.unshift(t); st.msgs=st.msgs.slice(0,3); st.lastMsg=st.tau; tote.innerHTML=st.msgs.map(function(m,k){return '<span class="l'+k+'">'+esc(m)+'</span>';}).join(''); }
@@ -772,7 +777,7 @@ INIT.race=function(){
     fr++; if(fr%90===0) C=themeColors();
     if(wrap.clientWidth>0&&Math.floor(wrap.clientWidth)!==g.W) setup();
     var scale=1;
-    if(!RM&&close&&st.tau>0){ var lead0=0; rows.forEach(function(r){lead0=Math.max(lead0,progress(r,st.tau));}); if(lead0>0.9&&st.tau<winnerT+0.9) scale=0.5; }
+    if(!RM&&close&&st.tau>0){ var lead0=0; rows.forEach(function(r){lead0=Math.max(lead0,progress(r,st.tau));}); if(lead0>0.955&&st.tau<winnerT+0.9) scale=0.5; }
     st.slow=scale<1;
     var prevTau=st.tau; st.tau+=dt*scale; var tau=st.tau;
     if(prevTau<0&&tau>=0) say("They're off!");
@@ -781,7 +786,7 @@ INIT.race=function(){
     rows.forEach(function(r,i){
       var done=tau>=r.T;
       P[i]=tau<0?0:progress(r,tau);
-      V[i]=tau<0?0:done?Math.exp(-(tau-r.T)*1.6):speedAt(r,tau)*16;
+      V[i]=tau<0?0:done?Math.exp(-(tau-r.T)*1.6):speedAt(r,tau)*RT0;
       B[i]=done?38*(1-Math.exp(-(tau-r.T)*2.4)):0;
       if(V[i]>0.02) st.ph[i]+=dt*scale*(3+8*V[i]);
     });
@@ -794,8 +799,9 @@ INIT.race=function(){
     // commentary
     var leadP=P[idxs[0]];
     if(st.nFin===0&&tau>1&&tau-st.lastMsg>1.8){
-      if(!st.half&&leadP>=0.5){ st.half=true; say('Halfway. '+nm(idxs[0])+' leads.'); }
-      else if(!st.last&&leadP>=0.83){ st.last=true; say('Into the final furlong. '+nm(idxs[0])+' in front.'); }
+      var lapNow=Math.min(LAPS,Math.floor(leadP*LAPS)+1);
+      if(lapNow>(st.lapSaid||1)){ st.lapSaid=lapNow; say((lapNow===LAPS?'Final lap. ':'Lap '+lapNow+' of '+LAPS+'. ')+nm(idxs[0])+' leads.'); }
+      else if(!st.last&&leadP>=1-1/(6*LAPS)){ st.last=true; say('Into the final furlong. '+nm(idxs[0])+' in front.'); }
       else if(st.prevRank){
         if(idxs[0]!==st.prevIdx[0]) say(nm(idxs[0])+' goes to the front');
         else { for(var k=1;k<Math.min(3,n);k++){ var h=idxs[k]; if(st.prevRank[h]>k){ say(nm(h)+' moves up to '+ord(k+1)); break; } } }
@@ -817,30 +823,53 @@ INIT.race=function(){
 
     // draw track
     var W=g.W, y0=g.top-6, y1=g.top+n*g.laneH+4;
+    // camera: follows the leader, so the turf scrolls past. x0 is where the start line sits on screen.
+    var plead=0; for(var q0=0;q0<n;q0++) plead=Math.max(plead,P[q0]);
+    var Ssc=LAPS*(g.finishX-g.left), mid=g.left+0.55*(g.finishX-g.left);
+    var ss=function(v){ v=Math.min(1,Math.max(0,v)); return v*v*(3-2*v); };
+    var lx=g.left+(mid-g.left)*ss(plead/0.06)+(g.finishX-mid)*ss((plead-0.88)/0.12);
+    var x0=lx-plead*Ssc, wx=function(w){ return x0+w*Ssc; };
     ctx.fillStyle=C.surface; ctx.fillRect(0,0,W,g.H);
-    paintTurf(ctx,W,y0,y1,C,0); paintRails(ctx,W,y0,y1,C);
+    paintTurf(ctx,W,y0,y1,C,x0); paintRails(ctx,W,y0,y1,C,x0);
     ctx.strokeStyle='rgba(255,255,255,.28)'; ctx.lineWidth=1; ctx.setLineDash([8,10]);
     for(var l=1;l<n;l++){ ctx.beginPath(); ctx.moveTo(0,g.top+l*g.laneH); ctx.lineTo(W,g.top+l*g.laneH); ctx.stroke(); }
     ctx.setLineDash([]);
-    // furlong poles
+    // furlong poles (labelled in the last five) and a gantry at each lap line
     ctx.font='500 10px "JetBrains Mono",monospace'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-    for(var f=5;f>=1;f--){ var fx=g.left+(g.finishX-g.left)*((6-f)/6); ctx.fillStyle=C.rail; ctx.fillRect(fx-1,y0-12,2,12); ctx.fillStyle=C.muted; ctx.fillText(f+'f',fx,y0-16); }
+    var FT=6*LAPS;
+    for(var f=1;f<FT;f++){
+      var fx=wx(f/FT); if(fx<-20||fx>W+20) continue;
+      var rem=FT-f;
+      if(f%6===0){
+        var lapN=f/6+1;
+        ctx.fillStyle='rgba(255,255,255,.55)'; ctx.fillRect(fx-1.5,y0,3,y1-y0);
+        ctx.fillStyle=C.rail; ctx.fillRect(fx-1.5,y0-14,3,14);
+        ctx.font='900 12px "Big Shoulders Display",Impact,sans-serif'; ctx.fillStyle=C.muted; ctx.fillText('LAP '+lapN,fx,y0-18);
+        ctx.font='500 10px "JetBrains Mono",monospace';
+      } else {
+        ctx.fillStyle=C.rail; ctx.fillRect(fx-1,y0-12,2,12);
+        if(rem<=5){ ctx.fillStyle=C.muted; ctx.fillText(rem+'f',fx,y0-16); }
+      }
+    }
     // stalls
+    ctx.save(); ctx.translate(x0-g.left,0);
     var open=tau<0?0:Math.min(1,tau/0.6);
     ctx.strokeStyle='#323b36'; ctx.lineWidth=3;
     for(var q=0;q<=n;q++){ var qy=g.top+q*g.laneH; ctx.beginPath(); ctx.moveTo(g.left-52,qy); ctx.lineTo(g.left-9,qy); ctx.stroke(); }
     ctx.beginPath(); ctx.moveTo(g.left-9,y0+6); ctx.lineTo(g.left-9,y1-2); ctx.stroke();
     if(open<1){ ctx.globalAlpha=1-open; ctx.strokeStyle='#e8eee9'; ctx.lineWidth=2; for(var d=0;d<n;d++){ var dy=g.top+d*g.laneH; ctx.beginPath(); ctx.moveTo(g.left-7,dy+8); ctx.lineTo(g.left-7,dy+g.laneH-3); ctx.stroke(); } ctx.globalAlpha=1; }
+    ctx.restore();
     // lane plates
     if(!g.narrow){ for(var pl=0;pl<n;pl++){ var py=g.top+pl*g.laneH+(g.laneH-18)/2; ctx.fillStyle=S.raceSeats[pl].silks.c1; ctx.fillRect(6,py,18,18); ctx.fillStyle='#fff'; ctx.font='900 14px "Big Shoulders Display",Impact,sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(String(pl+1),15,py+9.5); } }
+    var fl=wx(1);
     // finish line
-    for(var cy=y0,ci=0;cy<y1;cy+=8,ci++){ ctx.fillStyle=ci%2?'#111':'#fff'; ctx.fillRect(g.finishX,cy,4,Math.min(8,y1-cy)); ctx.fillStyle=ci%2?'#fff':'#111'; ctx.fillRect(g.finishX+4,cy,4,Math.min(8,y1-cy)); }
-    ctx.fillStyle=C.accent; ctx.font='900 12px "Big Shoulders Display",Impact,sans-serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillText('FINISH',g.finishX+4,y0-16);
-    if(st.flash>0){ ctx.fillStyle='rgba(255,255,255,'+(st.flash*0.35)+')'; ctx.fillRect(g.finishX-30,y0,60,y1-y0); st.flash=Math.max(0,st.flash-dt*1.4); }
+    for(var cy=y0,ci=0;cy<y1;cy+=8,ci++){ ctx.fillStyle=ci%2?'#111':'#fff'; ctx.fillRect(fl,cy,4,Math.min(8,y1-cy)); ctx.fillStyle=ci%2?'#fff':'#111'; ctx.fillRect(fl+4,cy,4,Math.min(8,y1-cy)); }
+    ctx.fillStyle=C.accent; ctx.font='900 12px "Big Shoulders Display",Impact,sans-serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillText('FINISH',fl+4,y0-16);
+    if(st.flash>0){ ctx.fillStyle='rgba(255,255,255,'+(st.flash*0.35)+')'; ctx.fillRect(fl-30,y0,60,y1-y0); st.flash=Math.max(0,st.flash-dt*1.4); }
 
     // horses (back lane first)
     for(var i2=0;i2<n;i2++){
-      var nose=g.left+(g.finishX-g.left)*P[i2]+B[i2], cx=nose-38*g.s, gy=laneGround(i2);
+      var nose=lx-(plead-P[i2])*(Ssc/LAPS)+B[i2], cx=nose-38*g.s, gy=laneGround(i2);
       var m=Math.min(1,V[i2]*1.1);
       drawHorse(ctx,cx,gy,g.s,st.ph[i2],m,S.raceSeats[i2].silks,i2+1);
       var tail=cx-33*g.s-5;
@@ -860,6 +889,7 @@ INIT.race=function(){
     for(var di=st.dust.length-1;di>=0;di--){ var p=st.dust[di]; p.life-=dt; if(p.life<=0){ st.dust.splice(di,1); continue; } p.x+=p.vx*dt; p.y+=p.vy*dt; ctx.fillStyle='rgba(222,206,170,'+(p.life/p.max*0.45)+')'; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill(); }
     // confetti
     for(var ci2=st.conf.length-1;ci2>=0;ci2--){ var c2=st.conf[ci2]; c2.life-=dt; c2.vy+=420*dt; c2.x+=c2.vx*dt; c2.y+=c2.vy*dt; c2.rot+=c2.vr*dt; if(c2.life<=0||c2.y>g.H+10){ st.conf.splice(ci2,1); continue; } ctx.save(); ctx.translate(c2.x,c2.y); ctx.rotate(c2.rot); ctx.fillStyle=c2.col; ctx.fillRect(-3,-1.5,6,3); ctx.restore(); }
+    if(tau>0&&!st.fin[idxs[0]]){ var lapShow=Math.min(LAPS,Math.floor(plead*LAPS)+1); ctx.font='900 13px "Big Shoulders Display",Impact,sans-serif'; ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.fillStyle='rgba(10,20,14,.7)'; ctx.fillRect(6,g.H-19,78,16); ctx.fillStyle='#fff'; ctx.fillText('LAP '+lapShow+' OF '+LAPS,12,g.H-10.5); }
     // overlays
     ctx.textAlign='center'; ctx.textBaseline='middle';
     if(tau<0||tau<0.9){
@@ -1044,7 +1074,7 @@ function updateCreateForm(){
   var c=createCheck(true), sum=$('#createSum'); if(!sum) return;
   $('#nVal').textContent=S.draft.n;
   $('#createMsg').textContent=c.msg; $('#createMsg').className='msg'+(c.msg?' bad':'');
-  sum.innerHTML=c.stakeU!==null?'Pool <b>'+usd(c.stakeU*BigInt(S.draft.n))+' USDC</b> · winner takes all · 6 furlongs':'';
+  sum.innerHTML=c.stakeU!==null?'Pool <b>'+usd(c.stakeU*BigInt(S.draft.n))+' USDC</b> · winner takes all · 3 laps':'';
   var b=$('#createBtn'); b.disabled=!c.ok||!!S.busy; b.textContent=S.busy?S.busy:'Open the stalls';
   document.querySelectorAll('[data-act=stake]').forEach(function(x){x.setAttribute('aria-pressed',String(parseUsd(S.draft.stake)===BigInt(x.dataset.v)*1000000n));});
 }
@@ -1061,12 +1091,12 @@ function createPaddockHtml(){
   return '<div class="grid-main"><section class="panel paddock-panel"><h2>Trial Paddock</h2><p class="sub">Choose your horse name and see its look before opening the race. The name and your wallet determine its appearance.</p>'+ 
     '<label class="lab" for="trialName">Horse name</label><div class="row"><input type="text" id="trialName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Midnight Runner" value="'+esc(d.name)+'"><button type="button" class="btn alt" data-act="trialRandom">Random</button></div><p class="msg" id="paddockMsg"></p>'+ 
     '<div class="preview"><canvas id="trialCv" aria-label="Live preview of your horse and jockey silks"></canvas><div class="boostbox"><span class="lab">Your horse</span><div class="big mono" id="trialHorseName">'+esc(name)+'</div><p class="note" id="trialPreviewNote" style="margin:10px 0 0">Your boost remains hidden until the race ends.</p></div></div>'+ 
-    '<p class="sum" id="paddockSum">Planned pool <b>'+pool+' USDC</b> · winner takes all · 6 furlongs</p><div class="actions"><button type="button" class="btn hot" data-act="create" id="confirmCreate">Open the stalls</button><button type="button" class="btn alt" data-act="backLobby">Back</button></div><p class="note">Opening the stalls creates the real on-chain race and enters your horse. Your wallet will ask you to approve USDC if needed.</p></section>'+ 
-    '<aside class="panel"><h2>Racecard</h2><dl class="facts" style="margin-top:12px"><dt>Race</dt><dd>New race</dd><dt>Distance</dt><dd>6 furlongs</dd><dt>Stake</dt><dd>'+(stake===null?'—':usd(stake)+' USDC')+'</dd><dt>Pool</dt><dd>'+pool+' USDC</dd><dt>Host</dt><dd>'+(S.account?short(S.account):'Connect wallet')+'</dd></dl><ul class="seats" style="margin-top:12px">'+seats+'</ul></aside></div>';
+    '<p class="sum" id="paddockSum">Planned pool <b>'+pool+' USDC</b> · winner takes all · 3 laps</p><div class="actions"><button type="button" class="btn hot" data-act="create" id="confirmCreate">Open the stalls</button><button type="button" class="btn alt" data-act="backLobby">Back</button></div><p class="note">Opening the stalls creates the real on-chain race and enters your horse. Your wallet will ask you to approve USDC if needed.</p></section>'+ 
+    '<aside class="panel"><h2>Racecard</h2><dl class="facts" style="margin-top:12px"><dt>Race</dt><dd>New race</dd><dt>Distance</dt><dd>3 laps</dd><dt>Stake</dt><dd>'+(stake===null?'—':usd(stake)+' USDC')+'</dd><dt>Pool</dt><dd>'+pool+' USDC</dd><dt>Host</dt><dd>'+(S.account?short(S.account):'Connect wallet')+'</dd></dl><ul class="seats" style="margin-top:12px">'+seats+'</ul></aside></div>';
 }
 function createPaddockInit(){
   var inp=$('#trialName');
-  if(inp){ inp.addEventListener('input',function(){ S.draft.name=inp.value; S.trialName=inp.value; var m=$('#paddockMsg'), e=inp.value?validateName(norm(inp.value),null):'Enter a horse name to continue.'; if(m){m.textContent=e;m.className='msg'+(e?' bad':'');} var b=$('#confirmCreate'); if(b)b.disabled=!!e||!!S.busy; var label=$('#trialHorseName');if(label)label.textContent=norm(inp.value)||'Your horse'; var sum=$('#paddockSum'), st=parseUsd(S.draft.stake);if(sum)sum.innerHTML='Planned pool <b>'+(st===null?'—':usd(st*BigInt(S.draft.n)))+' USDC</b> · winner takes all · 6 furlongs'; drawTrialPreview(performance.now()/180); }); }
+  if(inp){ inp.addEventListener('input',function(){ S.draft.name=inp.value; S.trialName=inp.value; var m=$('#paddockMsg'), e=inp.value?validateName(norm(inp.value),null):'Enter a horse name to continue.'; if(m){m.textContent=e;m.className='msg'+(e?' bad':'');} var b=$('#confirmCreate'); if(b)b.disabled=!!e||!!S.busy; var label=$('#trialHorseName');if(label)label.textContent=norm(inp.value)||'Your horse'; var sum=$('#paddockSum'), st=parseUsd(S.draft.stake);if(sum)sum.innerHTML='Planned pool <b>'+(st===null?'—':usd(st*BigInt(S.draft.n)))+' USDC</b> · winner takes all · 3 laps'; drawTrialPreview(performance.now()/180); }); }
   if(inp){ S.trialName=S.draft.name||'Midnight Runner'; drawTrialPreview(performance.now()/180); }
   var b=$('#confirmCreate'); if(b)b.disabled=!S.draft.name||!!validateName(norm(S.draft.name),null)||!!S.busy;
   var cv=$('#trialCv'); if(cv){ var ph=0; startLoop(function(dt){ph+=dt*(RM?0:6);drawTrialPreview(ph);}); }
@@ -1088,7 +1118,7 @@ function seatsHtml(g,mode){
   return h;
 }
 function factsHtml(g){
-  return '<dl class="facts" style="margin-top:12px"><dt>Race</dt><dd>'+raceName(g.id)+' <span class="mono">#'+g.id+'</span></dd><dt>Distance</dt><dd>6 furlongs</dd><dt>Stake</dt><dd>'+usd(g.stake)+' USDC</dd><dt>Pool</dt><dd>'+usd(g.stake*BigInt(g.maxPlayers))+' USDC</dd><dt>Host</dt><dd>'+short(g.host)+'</dd></dl>';
+  return '<dl class="facts" style="margin-top:12px"><dt>Race</dt><dd>'+raceName(g.id)+' <span class="mono">#'+g.id+'</span></dd><dt>Distance</dt><dd>3 laps</dd><dt>Stake</dt><dd>'+usd(g.stake)+' USDC</dd><dt>Pool</dt><dd>'+usd(g.stake*BigInt(g.maxPlayers))+' USDC</dd><dt>Host</dt><dd>'+short(g.host)+'</dd></dl>';
 }
 
 /* ----- join (stable) ----- */
