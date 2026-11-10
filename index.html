@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light">
 <title>StableRun</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f2a1c'/%3E%3Cpath d='M19 13v23a13 13 0 0 0 26 0V13' fill='none' stroke='%23e8472f' stroke-width='9' stroke-linecap='round'/%3E%3Cpath d='M19 18v6M45 18v6M19 30v6M45 30v6' stroke='%230f2a1c' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Hanken+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: one racecard column. The loud moments are the hero banner and the race stage; every other panel stays quiet and print-like. */
@@ -631,13 +632,13 @@ function startPolling(){
    so the finishing order never changes. Here we try many wave sets and keep the one with the most overtaking before the closing stretch. */
 /* Biggest swing in pace. 0.6 means a horse is never slower than 40% of its average speed. */
 var MAXSWING=0.60;
-function setWaves(rows,g,seats,a){
+function setWaves(rows,g,seats,a,calm){
   rows.forEach(function(r,i){
     var h=h32(g.seed+'|'+g.players[seats[i].pi].wallet+'#'+a,21);
     var k1=1+(h%3), sg1=(h>>>2)&1?1:-1, A1=sg1*(0.28+((h>>>3)%23)/100);
     var k2=2+((h>>>9)%4); if(k2===k1) k2++;
     var room=Math.max(0,MAXSWING-Math.abs(A1)), A2=((h>>>12)&1?1:-1)*(((h>>>13)%101)/100)*room;
-    r.k1=k1; r.k2=k2; r.A1=A1; r.A2=A2;
+    var m=calm?CALM:1; r.k1=k1; r.k2=k2; r.A1=A1*m; r.A2=A2*m;
   });
 }
 function overtakes(rows){
@@ -652,7 +653,10 @@ function overtakes(rows){
   }
   return Math.min(flips,3*n*(n-1)/2+6)+Math.min(lead,5)*3;
 }
+/* About 3 races in 10 are 'clean': pace stays almost steady, so the winner just pulls away and nobody overtakes. */
+var CALM=0.1, CALM_SHARE=20;
 function pickWaves(rows,g,seats){
+  if(h32(String(g.seed)+'|style',77)%100<CALM_SHARE){ setWaves(rows,g,seats,0,true); return; }
   var best=-1, bestA=0;
   for(var a=0;a<80;a++){
     setWaves(rows,g,seats,a);
@@ -1087,7 +1091,7 @@ function lobbyHtml(){
       '<div class="field"><label class="lab" for="stakeIn">Stake per player (USDC)</label><input type="text" id="stakeIn" inputmode="decimal" autocomplete="off" value="'+esc(d.stake)+'" placeholder="Any amount, minimum 0.01"><div class="chips" role="group" aria-label="Quick amounts" style="margin-top:10px">'+
       [1,5,10,25].map(function(v){return '<button type="button" class="chip" data-act="stake" data-v="'+v+'">'+v+'</button>';}).join('')+'</div></div>'+
       '<p class="msg" id="createMsg"></p><p class="sum" id="createSum"></p>'+
-      '<div class="actions"><button type="button" class="btn hot" data-act="goPaddock" id="createBtn">Open the stalls</button></div>'+
+      '<div class="actions"><button type="button" class="btn hot" data-act="goPaddock" id="createBtn">Create a Race</button></div>'+
       ''+
       '<p class="note">First time only, your wallet also asks you to approve USDC. After that it is one signature per race.</p></section>'+
     '<div class="stack"><section class="panel"><h2>Join a Race</h2><p class="sub">Open races waiting for horses.</p>'+joinList+
@@ -1111,7 +1115,7 @@ function updateCreateForm(){
   $('#nVal').textContent=S.draft.n;
   $('#createMsg').textContent=c.msg; $('#createMsg').className='msg'+(c.msg?' bad':'');
   sum.innerHTML=c.stakeU!==null?'Pool <b>'+usd(c.stakeU*BigInt(S.draft.n))+' USDC</b> · winner takes all · 3 laps':'';
-  var b=$('#createBtn'); b.disabled=!c.ok||!!S.busy; b.textContent=S.busy?S.busy:'Open the stalls';
+  var b=$('#createBtn'); b.disabled=!c.ok||!!S.busy; b.textContent=S.busy?S.busy:'Create a Race';
   document.querySelectorAll('[data-act=stake]').forEach(function(x){x.setAttribute('aria-pressed',String(parseUsd(S.draft.stake)===BigInt(x.dataset.v)*1000000n));});
 }
 
@@ -1127,7 +1131,7 @@ function createPaddockHtml(){
   return '<div class="grid-main"><section class="panel paddock-panel"><h2>Trial Paddock</h2><p class="sub">Choose your horse name and see its look before opening the race. The name and your wallet determine its appearance.</p>'+ 
     '<label class="lab" for="trialName">Horse name</label><div class="row"><input type="text" id="trialName" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Midnight Runner" value="'+esc(d.name)+'"><button type="button" class="btn alt" data-act="trialRandom">Random</button></div><p class="msg" id="paddockMsg"></p>'+ 
     '<div class="preview"><canvas id="trialCv" aria-label="Live preview of your horse and jockey silks"></canvas><div class="boostbox"><span class="lab">Your horse</span><div class="big mono" id="trialHorseName">'+esc(name)+'</div><p class="note" id="trialPreviewNote" style="margin:10px 0 0">Your boost remains hidden until the race ends.</p></div></div>'+ 
-    '<p class="sum" id="paddockSum">Planned pool <b>'+pool+' USDC</b> · winner takes all · 3 laps</p><div class="actions"><button type="button" class="btn hot" data-act="create" id="confirmCreate">Open the stalls</button><button type="button" class="btn alt" data-act="backLobby">Back</button></div><p class="note">Opening the stalls creates the real on-chain race and enters your horse. Your wallet will ask you to approve USDC if needed.</p></section>'+ 
+    '<p class="sum" id="paddockSum">Planned pool <b>'+pool+' USDC</b> · winner takes all · 3 laps</p><div class="actions"><button type="button" class="btn hot" data-act="create" id="confirmCreate">Create a Race</button><button type="button" class="btn alt" data-act="backLobby">Back</button></div><p class="note">Opening the stalls creates the real on-chain race and enters your horse. Your wallet will ask you to approve USDC if needed.</p></section>'+ 
     '<aside class="panel"><h2>Racecard</h2><dl class="facts" style="margin-top:12px"><dt>Race</dt><dd>New race</dd><dt>Distance</dt><dd>3 laps</dd><dt>Stake</dt><dd>'+(stake===null?'—':usd(stake)+' USDC')+'</dd><dt>Pool</dt><dd>'+pool+' USDC</dd><dt>Host</dt><dd>'+(S.account?short(S.account):'Connect wallet')+'</dd></dl><ul class="seats" style="margin-top:12px">'+seats+'</ul></aside></div>';
 }
 function createPaddockInit(){
