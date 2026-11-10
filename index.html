@@ -1040,19 +1040,21 @@ function fenceList(course){
 function drawFence(ctx,x,gy,s,course,C){
   ctx.save();
   if(course==='chase'){
-    // a wooden gate: two posts, four rails, a white top rail with red end caps
+    // a wooden gate seen from above: posts, four rails, and the white marker rail with red ends running up the right side
     var h=48*s, gw=26*s, px=x-gw/2, qx=x+gw/2;
     ctx.fillStyle='rgba(0,0,0,.2)'; ctx.fillRect(px-3*s,gy-1.5,gw+6*s,3);
     ctx.fillStyle='#6b4a2b'; ctx.fillRect(px-2.5*s,gy-h-4*s,5*s,h+4*s); ctx.fillRect(qx-2.5*s,gy-h-4*s,5*s,h+4*s);
-    for(var k=0;k<4;k++){ var yy=gy-h*(0.12+k*0.27); ctx.fillStyle=k===3?'#f4efe6':'#8a6238'; ctx.fillRect(px-2*s,yy-2.6*s,gw+4*s,5.2*s); if(k===3){ ctx.fillStyle='#e8472f'; ctx.fillRect(px-2*s,yy-2.6*s,5*s,5.2*s); ctx.fillRect(qx-3*s,yy-2.6*s,5*s,5.2*s); } }
+    for(var k=0;k<4;k++){ var yy=gy-h*(0.12+k*0.27); ctx.fillStyle='#8a6238'; ctx.fillRect(px-2*s,yy-2.6*s,gw+2*s,5.2*s); }
+    ctx.fillStyle='#f4efe6'; ctx.fillRect(qx-2.5*s,gy-h-4*s,5.5*s,h+4*s);
+    ctx.fillStyle='#e8472f'; ctx.fillRect(qx-2.5*s,gy-h-4*s,5.5*s,7*s); ctx.fillRect(qx-2.5*s,gy-7*s,5.5*s,7*s);
     ctx.strokeStyle='#5a3d22'; ctx.lineWidth=1.6*s; ctx.beginPath(); ctx.moveTo(px,gy-h*0.12); ctx.lineTo(qx,gy-h*0.85); ctx.stroke();
   } else {
     // a hurdle: low green brush with a white top rail
-    var hh=20*s, w=10*s;
+    var hh=20*s, w=17*s;
     ctx.fillStyle='rgba(0,0,0,.18)'; ctx.fillRect(x-w*0.6,gy-1.5,w*2.2,3);
     ctx.fillStyle='#3f8a3f'; ctx.beginPath(); ctx.moveTo(x-w/2,gy); ctx.lineTo(x+w/2,gy); ctx.lineTo(x+w/2-1.5*s,gy-hh); ctx.lineTo(x-w/2-1.5*s,gy-hh); ctx.closePath(); ctx.fill();
     ctx.strokeStyle='rgba(0,0,0,.25)'; ctx.lineWidth=1; for(var q=1;q<4;q++){ var y2=gy-hh*q/4; ctx.beginPath(); ctx.moveTo(x-w/2-q*0.4*s,y2); ctx.lineTo(x+w/2-q*0.4*s,y2); ctx.stroke(); }
-    ctx.fillStyle='#fff'; ctx.fillRect(x-w/2-2*s,gy-hh-3*s,w+2*s,3.2*s);
+    ctx.fillStyle='#fff'; ctx.fillRect(x+w/2-2.5*s,gy-hh-2*s,4*s,hh+2*s);   // white marker rail up the right side
   }
   ctx.restore();
 }
