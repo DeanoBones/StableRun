@@ -837,7 +837,7 @@ VIEWFN.race=function(){
     var s=S.raceSeats[i];
     rows+='<div class="brow" id="br'+i+'" style="transform:translateY('+(i*44)+'px)"><span class="pos mono">–</span><span class="no" style="background:'+s.silks.c1+'">'+(i+1)+'</span><span class="nm">'+esc(s.name)+'</span><span class="bst"></span><span class="gap mono"></span></div>';
   }
-  return '<div class="stagehead"><h2>'+raceName(G.id)+' · '+LAPS+' laps</h2><span class="mono">Going: good to firm · '+pool()+' USDC to the winner</span></div>'+
+  return '<div class="stagehead"><h2>'+raceName(G.id)+' · '+LAPS+' laps'+(courseOf(G)==='flat'?'':courseOf(G)==='hurdles'?' · hurdles':' · steeplechase')+'</h2><span class="mono">Going: good to firm · '+pool()+' USDC to the winner</span></div>'+
     '<div class="stagewrap"><canvas id="track" aria-label="Animated horse race"></canvas><div class="tote" id="tote" aria-live="polite"><span class="l0">Horses are loading into the stalls.</span></div></div>'+
     '<div class="board" id="board" style="height:'+(n*44)+'px">'+rows+'</div>'+
     '<div class="after"><button type="button" class="btn hot" data-act="result" id="afterBtn" hidden>See the result</button><button type="button" class="linkbtn" data-act="skip">Skip to result</button></div>';
@@ -852,6 +852,7 @@ INIT.race=function(){
   function setup(){ var W=Math.max(300,Math.floor(wrap.clientWidth)); g=geo(W,n); cv.width=Math.round(W*dpr); cv.height=Math.round(g.H*dpr); cv.style.height=g.H+'px'; ctx.setTransform(dpr,0,0,dpr,0,0); }
   setup();
   var C=themeColors(), fr=0, tote=$('#tote'), lastBoard=0;
+  var course=courseOf(G), fences=fenceList(course);
   var winnerT=R.order[0].T, close=n>1&&(R.order[1].T-R.order[0].T)<0.35*RTS;
   var st={tau:-3,msgs:[],lastMsg:-9,prevRank:null,prevIdx:null,fin:rows.map(function(){return false;}),nFin:0,ph:rows.map(function(){return 0;}),dust:[],conf:[],flash:0,half:false,last:false,slow:false};
   var nm=function(i){return S.raceSeats[i].name;};
@@ -958,8 +959,20 @@ INIT.race=function(){
     // horses (back lane first)
     for(var i2=0;i2<n;i2++){
       var nose=Math.max(46*g.s,lx-(plead-P[i2])*Ssc)+B[i2], cx=nose-38*g.s, gy=laneGround(i2);
-      var m=Math.min(1,V[i2]*1.1);
-      drawHorse(ctx,cx,gy,g.s,st.ph[i2],m,S.raceSeats[i2].silks,i2+1);
+      var m=Math.min(1,V[i2]*1.1), lift=0, ang=0, phh=st.ph[i2];
+      if(fences.length){
+        var Lj=(course==='chase'?92:72)*g.s, Hj=(course==='chase'?44:26)*g.s;
+        for(var fi=0;fi<fences.length;fi++){
+          var fxx=wx(fences[fi]); if(fxx<-30||fxx>W+30) continue;
+          drawFence(ctx,fxx,gy,g.s,course,C);
+          var dj=cx-fxx;
+          if(tau>0&&dj>-Lj&&dj<Lj){ var sj=(dj+Lj)/(2*Lj); lift=Hj*Math.sin(Math.PI*sj); ang=-0.16*Math.cos(Math.PI*sj); if(sj>0.12&&sj<0.88){ phh=1.1; m=0.9; } }
+        }
+      }
+      if(lift>0.5){
+        ctx.fillStyle='rgba(0,0,0,.16)'; ctx.beginPath(); ctx.ellipse(cx,gy,22*g.s*(1-lift/(Hj*3)),3*g.s,0,0,7); ctx.fill();
+        ctx.save(); ctx.translate(cx,gy-lift-22*g.s); ctx.rotate(ang); drawHorse(ctx,0,22*g.s,g.s,phh,m,S.raceSeats[i2].silks,i2+1); ctx.restore();
+      } else drawHorse(ctx,cx,gy,g.s,phh,m,S.raceSeats[i2].silks,i2+1);
       var tail=cx-33*g.s-5;
       if(tau>0.3){
         ctx.font='700 '+(g.narrow?10:11)+'px "Hanken Grotesk",sans-serif'; ctx.textAlign='right'; ctx.textBaseline='middle';
@@ -1016,6 +1029,23 @@ var RN_A=['Golden','Silver','Midnight','Scarlet','Emerald','Crimson','Misty','Th
 var RN_N=['Meadow','Derby','Cup','Plate','Stakes','Handicap','Classic','Sprint','Gallop','Hurdle','Furlong','Paddock','Stirrup','Canter','Turf','Oaks','Chase','Trophy','Dash','Mile','Rails','Bridle','Saddle','Horseshoe','Hollow','Heath','Ridge','Downs','Park','Leap','Charge','Run'];
 /* Every race gets a fixed name from its number, the same for everyone. 1024 different names before any repeat. */
 function raceName(id){ var x=(Number(id)*389+171)%1024; return RN_A[x>>5]+' '+RN_N[x&31]; }
+/* Course type comes from the same race data as everything else, so it is a surprise at the start and the same for everyone.
+   Flat is most common. Hurdles are low fences, the chase has big ones. Jumping is only for show: it never changes who wins. */
+function courseOf(g){ var x=h32(String(g.seed)+'|course',91)%100; return x<55?'flat':x<80?'hurdles':'chase'; }
+function fenceList(course){
+  var out=[], per=course==='hurdles'?4:course==='chase'?3:0;
+  for(var l=0;l<LAPS;l++) for(var i=0;i<per;i++) out.push((l+(course==='hurdles'?0.16+i*0.2:0.22+i*0.26))/LAPS);
+  return out;
+}
+function drawFence(ctx,x,gy,s,course,C){
+  var h=(course==='chase'?34:20)*s, w=(course==='chase'?15:10)*s;
+  ctx.save();
+  ctx.fillStyle='rgba(0,0,0,.18)'; ctx.fillRect(x-w*0.6,gy-1.5,w*2.2,3);
+  ctx.fillStyle=course==='chase'?'#2a6a35':'#3f8a3f'; ctx.beginPath(); ctx.moveTo(x-w/2,gy); ctx.lineTo(x+w/2,gy); ctx.lineTo(x+w/2-1.5*s,gy-h); ctx.lineTo(x-w/2-1.5*s,gy-h); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,.25)'; ctx.lineWidth=1; for(var k=1;k<4;k++){ var yy=gy-h*k/4; ctx.beginPath(); ctx.moveTo(x-w/2-k*0.4*s,yy); ctx.lineTo(x+w/2-k*0.4*s,yy); ctx.stroke(); }
+  ctx.fillStyle=course==='chase'?'#e8472f':'#fff'; ctx.fillRect(x-w/2-2*s,gy-h-3*s,w+2*s,3.2*s);
+  ctx.restore();
+}
 function stepIndex(){
   if(S.route.name!=='game'||!S.game) return 0;
   var g=S.game;
