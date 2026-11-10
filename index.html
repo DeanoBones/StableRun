@@ -642,53 +642,76 @@ function startPolling(){
 /* ---------- race data from chain results ---------- */
 /* Each horse's pace is a mix of two slow waves (surges and lulls) that always end exactly at its finish time,
    so the finishing order never changes. Here we try many wave sets and keep the one with the most overtaking before the closing stretch. */
-/* Each horse gets one small kick in the first two laps and two bigger ones in the last lap, so the sprint to the line is where it all happens.
-   SURGE_MAX is the most of the race a horse can gain in kicks, so its base pace is never below 1-SURGE_MAX. */
-var SURGE_MAX=0.12;
-function setWaves(rows,g,seats,a,calm){
+/* Every race gets a "story", chosen from its own data so everyone sees the same one:
+     wire    the winner leads from the start and pulls away
+     holdoff the winner leads all the way but is chased hard
+     comeback  others lead early, the winner reels them in late
+     duel    a tight fight, small gaps most of the way
+     busy    lots of lead changes
+   Each horse's pace is a steady base plus three kicks (short and sharp, medium, or long and slow). Kicks never change when a horse
+   finishes, so the finishing order is always the contract's. A story is made by trying many sets of kicks and keeping the best fit. */
+var CALM=0.1;
+function raceStyle(g){ var x=h32(String(g.seed)+'|style',77)%100; return x<12?'wire':x<26?'holdoff':x<46?'comeback':x<66?'duel':'busy'; }
+function winnerIdx(rows){ var w=0; rows.forEach(function(r,i){ if(r.T<rows[w].T) w=i; }); return w; }
+function setWaves(rows,g,seats,a,style){
+  var win=winnerIdx(rows);
   rows.forEach(function(r,i){
-    var wl=g.players[seats[i].pi].wallet, m=calm?CALM:1;
-    var hs=[h32(g.seed+'|'+wl+'#'+a,21),h32(g.seed+'|'+wl+'@'+a,34),h32(g.seed+'|'+wl+'%'+a,55)];
-    r.sg=hs.map(function(hh,j){
-      // j=0: small early kick. j=1 and j=2: the two last-lap kicks, kept mostly apart so they don't stack into one huge burst.
-      var D=(j?0.02+((hh>>>0)%6)/200:0.012+((hh>>>0)%3)/100)*m;
-      var w=j===0?0.25+((hh>>>8)%11)/100:j===1?0.18+((hh>>>8)%11)/100:0.16+((hh>>>8)%5)/100;
-      var lo=j===0?0.08:j===1?0.62:0.70, hi=j===0?Math.min(0.45,0.90-w):j===1?Math.min(0.72,0.90-w):0.90-w;
-      return {D:D,w:w,a:lo+((hh>>>16)%101)/100*Math.max(0,hi-lo)};
+    var wl=g.players[seats[i].pi].wallet, isWin=i===win;
+    var scale=style==='wire'?CALM:style==='duel'?0.75:(style==='comeback'&&isWin?1.15:1);
+    var kicks=[0,1,2].map(function(j){
+      var hh=h32(g.seed+'|'+wl+'#'+a+'.'+j,21+j), typ=(hh>>>24)%3, D, w;
+      if(typ===0){ D=0.008+((hh>>>0)%13)/1000; w=0.12+((hh>>>8)%5)/100; }          // short and sharp
+      else if(typ===1){ D=0.020+((hh>>>0)%26)/1000; w=0.18+((hh>>>8)%9)/100; }     // medium
+      else { D=0.030+((hh>>>0)%26)/1000; w=0.30+((hh>>>8)%11)/100; }               // long and slow
+      var lo=0.06, hi=0.90-w;
+      if(style==='comeback'){ if(isWin) lo=0.50+0.12*j; else if(j<2) hi=Math.min(hi,0.5); }
+      return {D:D*scale,w:w,a:Math.min(0.97-w,lo+((hh>>>16)%101)/100*Math.max(0,hi-lo))};   // a+w stays under 1 so every horse still ends exactly at 1
     });
+    var tot=kicks.reduce(function(x,k){return x+k.D;},0);
+    if(tot>0.2) kicks.forEach(function(k){ k.D*=0.2/tot; });
+    r.sg=kicks;
   });
 }
-function overtakes(rows){
-  var n=rows.length, tEnd=Math.min.apply(null,rows.map(function(r){return r.T;}))*0.93, N=160, flips=0, lead=0, prev=null, prevLead=-1;
+function scoreRace(rows,style){
+  var n=rows.length, win=winnerIdx(rows), tEnd=Math.min.apply(null,rows.map(function(r){return r.T;}))*0.93, N=160;
+  var flips=0, lead=0, prev=null, prevLead=-1, gap=0, behind=0, midN=0, lateWin=0, notWin=0;
   for(var j=1;j<=N;j++){
-    var t=tEnd*j/N, wg=j/N>0.67?1:-0.3, P=rows.map(function(r){return progress(r,t);}), cur=[];
+    var u=j/N, t=tEnd*u, wg=style==='busy'?(u>0.67?1:0.6):(u>0.5?1:0.5), P=rows.map(function(r){return progress(r,t);}), cur=[];
     for(var a=0;a<n;a++) for(var b=a+1;b<n;b++) cur.push(P[a]>P[b]?1:0);
     if(prev){
       var qi=0;
       for(var a1=0;a1<n;a1++) for(var b1=a1+1;b1<n;b1++,qi++) if(cur[qi]!==prev[qi]){
         flips+=wg;
-        // who was just passed? If it visibly eased off beforehand, the pass looks fake, so it counts against this candidate.
+        // if the horse that was just passed had visibly eased off, the pass looks fake: count against it
         var lo=cur[qi]?rows[b1]:rows[a1], t0=Math.max(0,t-2.5);
-        if(speedAt(lo,t)<speedAt(lo,t0)*0.88) flips-=2.5*Math.abs(wg);
+        if(speedAt(lo,t)<speedAt(lo,t0)*0.88) flips-=2.5*wg;
       }
     }
     prev=cur;
-    var li=0; for(var a2=1;a2<n;a2++) if(P[a2]>P[li]) li=a2;
-    if(prevLead>=0&&li!==prevLead) lead+=wg; prevLead=li;
+    var li=0, l2=-1; for(var a2=1;a2<n;a2++) if(P[a2]>P[li]) li=a2;
+    for(var a3=0;a3<n;a3++) if(a3!==li&&(l2<0||P[a3]>P[l2])) l2=a3;
+    if(l2>=0) gap+=P[li]-P[l2];
+    if(u>=0.25&&u<=0.7){ midN++; if(li!==win) behind++; }
+    if(li!==win&&u>0.08) notWin++;
+    if(prevLead>=0&&li!==prevLead){ lead+=wg; if(li===win&&u>0.6) lateWin=1; }
+    prevLead=li;
   }
-  return Math.min(flips,3*n*(n-1)/2+6)+Math.min(lead,5)*3;
+  var base=Math.min(flips,3*n*(n-1)/2+6)+Math.min(lead,5)*3;
+  if(style==='comeback') return 25*(behind/Math.max(1,midN))+(lateWin?20:0)+Math.min(flips,12)*0.3;
+  if(style==='duel') return -gap/N*400+Math.min(flips,10)*1.2+Math.min(lead,4)*2;
+  if(style==='holdoff') return -80*notWin/N-gap/N*250+Math.min(flips,8)*0.3;
+  return base;
 }
-/* About 3 races in 10 are 'clean': pace stays almost steady, so the winner just pulls away and nobody overtakes. */
-var CALM=0.1, CALM_SHARE=20;
-function pickWaves(rows,g,seats){
-  if(h32(String(g.seed)+'|style',77)%100<CALM_SHARE){ setWaves(rows,g,seats,0,true); return; }
-  var best=-1, bestA=0;
-  for(var a=0;a<80;a++){
-    setWaves(rows,g,seats,a);
-    var sc=overtakes(rows);
+function pickWaves(rows,g,seats,force){
+  var style=force||raceStyle(g);
+  if(style==='wire'||rows.length<2){ setWaves(rows,g,seats,0,'wire'); return; }
+  var best=-1e9, bestA=0, K=style==='busy'?80:120;
+  for(var a=0;a<K;a++){
+    setWaves(rows,g,seats,a,style);
+    var sc=scoreRace(rows,style);
     if(sc>best){ best=sc; bestA=a; }
   }
-  setWaves(rows,g,seats,bestA);
+  setWaves(rows,g,seats,bestA,style);
 }
 function buildRace(g){
   var seats=[], rows=[];
