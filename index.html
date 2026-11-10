@@ -324,13 +324,25 @@ function hms(sec){ sec=Math.max(0,Math.floor(sec)); var h=Math.floor(sec/3600), 
 /* The replay is purely visual: the contract fixes the finishing order, and these only set how long it takes to show.
    LAPS laps of the course, about RT0 seconds for the winner. RTS stretches the gaps in time so margins look the same as in the short race. */
 var LAPS=3, RT0=42, RTS=RT0/16;
+/* Pace model: a steady base pace plus a couple of short surges (kicks). Every horse still reaches the line at exactly its
+   own finish time, so the finishing order is fixed. Because pace never dips below the base, a horse is only ever passed
+   because another horse kicked, not because the leader eased off. */
 function progress(r,tau){
-  var u=Math.min(1,Math.max(0,tau/r.T));
-  return u+r.A1/(r.k1*Math.PI)*Math.sin(r.k1*Math.PI*u)+r.A2/(r.k2*Math.PI)*Math.sin(r.k2*Math.PI*u);
+  var u=Math.min(1,Math.max(0,tau/r.T)), p=u, sg=r.sg||[];
+  for(var j=0;j<sg.length;j++){
+    var x=Math.min(1,Math.max(0,(u-sg[j].a)/sg[j].w));
+    var y=1-x; p+=sg[j].D*(1-Math.pow(y,6)-6*x*Math.pow(y,5)-u);   // a kick: pace jumps fast, then fades slowly
+  }
+  return p;
 }
 function speedAt(r,tau){
-  var u=Math.min(1,Math.max(0,tau/r.T));
-  return (1+r.A1*Math.cos(r.k1*Math.PI*u)+r.A2*Math.cos(r.k2*Math.PI*u))/r.T;
+  var u=Math.min(1,Math.max(0,tau/r.T)), v=1, sg=r.sg||[];
+  for(var j=0;j<sg.length;j++){
+    var x=(u-sg[j].a)/sg[j].w;
+    v-=sg[j].D;
+    if(x>0&&x<1) v+=sg[j].D*30*x*Math.pow(1-x,4)/sg[j].w;
+  }
+  return v/r.T;
 }
 
 /* ---------- ABI by hand (only what this app needs) ---------- */
@@ -630,15 +642,15 @@ function startPolling(){
 /* ---------- race data from chain results ---------- */
 /* Each horse's pace is a mix of two slow waves (surges and lulls) that always end exactly at its finish time,
    so the finishing order never changes. Here we try many wave sets and keep the one with the most overtaking before the closing stretch. */
-/* Biggest swing in pace. 0.6 means a horse is never slower than 40% of its average speed. */
-var MAXSWING=0.60;
+/* Each horse gets two kicks. SURGE_MAX is the most of the race a horse can gain in kicks, so its base pace is never below 1-SURGE_MAX. */
+var SURGE_MAX=0.24;
 function setWaves(rows,g,seats,a,calm){
   rows.forEach(function(r,i){
-    var h=h32(g.seed+'|'+g.players[seats[i].pi].wallet+'#'+a,21);
-    var k1=1+(h%3), sg1=(h>>>2)&1?1:-1, A1=sg1*(0.28+((h>>>3)%23)/100);
-    var k2=2+((h>>>9)%4); if(k2===k1) k2++;
-    var room=Math.max(0,MAXSWING-Math.abs(A1)), A2=((h>>>12)&1?1:-1)*(((h>>>13)%101)/100)*room;
-    var m=calm?CALM:1; r.k1=k1; r.k2=k2; r.A1=A1*m; r.A2=A2*m;
+    var h=h32(g.seed+'|'+g.players[seats[i].pi].wallet+'#'+a,21), h2=h32(g.seed+'|'+g.players[seats[i].pi].wallet+'@'+a,34), m=calm?CALM:1;
+    r.sg=[0,1].map(function(j){
+      var hh=j?h2:h, D=(0.04+((hh>>>0)%9)/100)*m, w=0.16+((hh>>>8)%15)/100, lo=0.08, hi=0.90-w;
+      return {D:D,w:w,a:lo+((hh>>>16)%101)/100*(hi-lo)};
+    });
   });
 }
 function overtakes(rows){
@@ -646,7 +658,15 @@ function overtakes(rows){
   for(var j=1;j<=N;j++){
     var t=tEnd*j/N, P=rows.map(function(r){return progress(r,t);}), cur=[];
     for(var a=0;a<n;a++) for(var b=a+1;b<n;b++) cur.push(P[a]>P[b]?1:0);
-    if(prev) for(var q=0;q<cur.length;q++) if(cur[q]!==prev[q]) flips++;
+    if(prev){
+      var qi=0;
+      for(var a1=0;a1<n;a1++) for(var b1=a1+1;b1<n;b1++,qi++) if(cur[qi]!==prev[qi]){
+        flips++;
+        // who was just passed? If it visibly eased off beforehand, the pass looks fake, so it counts against this candidate.
+        var lo=cur[qi]?rows[b1]:rows[a1], t0=Math.max(0,t-2.5);
+        if(speedAt(lo,t)<speedAt(lo,t0)*0.88) flips-=2.5;
+      }
+    }
     prev=cur;
     var li=0; for(var a2=1;a2<n;a2++) if(P[a2]>P[li]) li=a2;
     if(prevLead>=0&&li!==prevLead) lead++; prevLead=li;
@@ -671,7 +691,7 @@ function buildRace(g){
   var maxPts=Math.max.apply(null,seats.map(function(s){return g.players[s.pi].score/100;}));
   seats.forEach(function(s,i){
     var p=g.players[s.pi], pts=p.score/100;
-    rows.push({idx:i,roll:p.roll/100,boost:p.boost/100,score:pts,T:RT0+(maxPts-pts)*0.06*RTS,k1:1,k2:2,A1:0,A2:0});
+    rows.push({idx:i,roll:p.roll/100,boost:p.boost/100,score:pts,T:RT0+(maxPts-pts)*0.06*RTS,k1:1,k2:2,A1:0,A2:0,sg:[]});
   });
   pickWaves(rows,g,seats);
   var order=rows.slice().sort(function(a,b){return b.score-a.score||a.idx-b.idx;});
